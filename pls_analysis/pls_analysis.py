@@ -260,6 +260,8 @@ def save_cum_variance_plot(r2x: np.ndarray, r2y: np.ndarray, out_png: str):
 # Main
 # ---------------------------
 def main():
+
+
     ap = argparse.ArgumentParser()
     ap.add_argument("--wide_csv", type=str, help="Path to merged wide CSV with id, day_in_study, estrogen, lh + features")
     ap.add_argument("--yaml", type=str, help="Optional YAML describing multiple CSVs to join (see docstring).")
@@ -267,6 +269,19 @@ def main():
     ap.add_argument("--max_components", type=int, default=10)
     ap.add_argument("--top_k", type=int, default=25)
     args = ap.parse_args()
+
+    # --- Default YAML fallback (only if no CLI args were given) ---
+    if not args.wide_csv and not args.yaml:
+        # resolve a default relative to the script location
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        #print(script_dir)
+        default_yaml = os.path.join(script_dir, "pls_data.yaml")
+        #print(default_yaml)
+        if os.path.exists(default_yaml):
+            args.yaml = default_yaml
+        else:
+            raise ValueError("Provide either --wide_csv or --yaml (or create configs/pls_data.yaml).")
+
 
     os.makedirs(args.out_dir, exist_ok=True)
     fig_dir = os.path.join(args.out_dir, "figs"); os.makedirs(fig_dir, exist_ok=True)
