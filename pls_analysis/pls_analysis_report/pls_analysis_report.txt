@@ -1,0 +1,54 @@
+================================================================================
+PLS ANALYSIS REPORT - HORMONE PREDICTION
+================================================================================
+Generated: 2025-11-09 17:28:05
+
+1. EXECUTIVE SUMMARY
+----------------------------------------
+Observations: 56796
+Predictors: 17
+Target Hormones: 3
+PLS Components: 3
+
+2. MODEL PERFORMANCE
+----------------------------------------
+R² Scores (Variance Explained):
+  LH         : 0.0246
+  ESTROGEN   : 0.1152
+  PDG        : 0.1388
+
+3. TOP 10 MOST IMPORTANT FEATURES
+----------------------------------------
+   1. *** stress_score              : 2.2921
+   2. *** lightly                   : 1.8007
+   3. *** very                      : 1.6026
+   4. *** efficiency                : 1.4434
+   5. *** moderately                : 1.3579
+   6. *   appetite                  : 0.6024
+   7. *   indigestion               : 0.5746
+   8. *   bloating                  : 0.5699
+   9. *   cramps                    : 0.5477
+  10. *   sleepissue                : 0.4711
+
+VIP > 1.0: Highly important, VIP 0.8-1.0: Moderately important, VIP < 0.8: Less important
+
+4. DATA QUALITY
+----------------------------------------
+Predictor Completeness:
+  appetite                  : 10086 / 68241 ( 14.8%)
+  exerciselevel             : 10072 / 68241 ( 14.8%)
+  headaches                 : 10061 / 68241 ( 14.7%)
+  cramps                    : 10060 / 68241 ( 14.7%)
+  sorebreasts               : 10059 / 68241 ( 14.7%)
+  fatigue                   : 10091 / 68241 ( 14.8%)
+  sleepissue                : 10069 / 68241 ( 14.8%)
+  stress                    : 10058 / 68241 ( 14.7%)
+  foodcravings              : 10059 / 68241 ( 14.7%)
+  indigestion               : 10049 / 68241 ( 14.7%)
+  bloating                  : 10063 / 68241 ( 14.7%)
+  minutesasleep             : 67384 / 68241 ( 98.7%)
+  efficiency                : 67384 / 68241 ( 98.7%)
+  lightly                   : 61242 / 68241 ( 89.7%)
+  moderately                : 61242 / 68241 ( 89.7%)
+  very                      : 61242 / 68241 ( 89.7%)
+  stress_score              : 65276 / 68241 ( 95.7%)
