@@ -1,0 +1,13 @@
+feature,importance,importance_normalized
+stress_score,0.16703953,16.703955
+very,0.16265397,16.265398
+lightly,0.12498128,12.498129
+total_activity,0.108093984,10.8094
+intense_ratio,0.10643473,10.643474
+moderately,0.09643992,9.643992
+minutesawake,0.09563121,9.563122
+stress_sleep_ratio,0.054277334,5.427734
+minutesasleep,0.029697098,2.9697099
+resting_hr,0.027489556,2.7489557
+efficiency,0.027261384,2.7261386
+minutestofallasleep,0.0,0.0
