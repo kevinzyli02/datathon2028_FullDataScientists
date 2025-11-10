@@ -1,7 +1,7 @@
 # random_forest_xgboost_analysis.py
 """
 RANDOM FOREST & XGBOOST ANALYSIS FOR HORMONE PREDICTION
-Fixed version with robust data merging
+With patient exclusion based on regular cycles
 """
 
 import pandas as pd
@@ -26,16 +26,62 @@ warnings.filterwarnings('ignore')
 # =============================================================================
 
 DATA_DIR = Path('/Users/kevin/Documents/GitHub/datathon2028_FullDataScientists/data')
+EXCLUSION_FILE = Path('/Users/kevin/Downloads/McPhases SelfReport Regular Cycles Labelled.csv')
 OUTPUT_DIR = Path('tree_models_report')
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
 
 # =============================================================================
-# DATA LOADING & PREPROCESSING - FIXED VERSION
+# PATIENT EXCLUSION FUNCTION
 # =============================================================================
 
-def load_and_preprocess_data():
-    """Load and preprocess data with robust merging"""
+def load_and_filter_patients():
+    """Load the exclusion list and return IDs of regular cycle patients"""
+    print("📋 Loading patient exclusion list...")
+
+    try:
+        exclusion_df = pd.read_csv(EXCLUSION_FILE)
+        print(f"   Exclusion file loaded: {exclusion_df.shape}")
+
+        # Check column names
+        print(f"   Columns in exclusion file: {list(exclusion_df.columns)}")
+
+        # Find the right column names (they might have spaces or different cases)
+        id_col = None
+        regular_col = None
+
+        for col in exclusion_df.columns:
+            if 'id' in col.lower():
+                id_col = col
+            if 'regular' in col.lower():
+                regular_col = col
+
+        if not id_col or not regular_col:
+            print("   ⚠️  Could not find ID and regular columns, using first two columns")
+            id_col = exclusion_df.columns[0]
+            regular_col = exclusion_df.columns[1]
+
+        print(f"   Using ID column: '{id_col}', Regular column: '{regular_col}'")
+
+        # Filter for regular cycles
+        regular_patients = exclusion_df[exclusion_df[regular_col] == 'yes'][id_col].unique()
+        print(f"   Regular cycle patients: {len(regular_patients)}")
+        print(f"   Total patients in exclusion file: {len(exclusion_df[id_col].unique())}")
+
+        return set(regular_patients)
+
+    except Exception as e:
+        print(f"   ⚠️  Error loading exclusion file: {e}")
+        print("   Continuing without patient exclusion")
+        return None
+
+
+# =============================================================================
+# DATA LOADING & PREPROCESSING - UPDATED WITH PATIENT FILTERING
+# =============================================================================
+
+def load_and_preprocess_data(regular_patient_ids):
+    """Load and preprocess data with patient filtering"""
     print("📂 Loading and preprocessing data...")
 
     # Load core datasets
@@ -43,7 +89,14 @@ def load_and_preprocess_data():
     glucose = pd.read_csv(DATA_DIR / 'glucose.csv')
     sleep = pd.read_csv(DATA_DIR / 'sleep.csv')
 
-    print(f"   hormones: {hormones.shape}, glucose: {glucose.shape}, sleep: {sleep.shape}")
+    print(f"   Original data - hormones: {hormones.shape}, glucose: {glucose.shape}, sleep: {sleep.shape}")
+
+    # Filter hormones data to only include regular cycle patients
+    if regular_patient_ids is not None:
+        original_count = len(hormones)
+        hormones = hormones[hormones['id'].isin(regular_patient_ids)]
+        print(
+            f"   Filtered hormones data: {len(hormones)}/{original_count} rows ({(len(hormones) / original_count * 100):.1f}%)")
 
     # Process glucose data
     glucose_daily = glucose.groupby(['id', 'day_in_study']).agg({
@@ -89,6 +142,10 @@ def load_and_preprocess_data():
                 key_cols = ['id', 'day_in_study']
                 available_cols = [col for col in key_cols + columns if col in df.columns]
                 df_subset = df[available_cols].copy()
+
+                # Filter optional datasets to only include regular patients if we have the list
+                if regular_patient_ids is not None:
+                    df_subset = df_subset[df_subset['id'].isin(regular_patient_ids)]
 
                 merged_data = safe_merge(merged_data, df_subset, ['id', 'day_in_study'], file.replace('.csv', ''))
                 print(f"   After {file} merge: {merged_data.shape}")
@@ -463,7 +520,7 @@ def create_comprehensive_visualizations(results, importance_results, X_test, y_t
 # REPORT GENERATION
 # =============================================================================
 
-def generate_comprehensive_report(results, importance_results, analysis_data, predictors):
+def generate_comprehensive_report(results, importance_results, analysis_data, predictors, regular_patient_ids):
     """Generate comprehensive analysis report"""
     print("\n📋 Generating comprehensive report...")
 
@@ -480,6 +537,10 @@ def generate_comprehensive_report(results, importance_results, analysis_data, pr
     report_content.append(f"Total observations: {len(analysis_data)}")
     report_content.append(f"Number of predictors: {len(predictors)}")
     report_content.append(f"Target hormones: {list(next(iter(results.values()))['metrics'].keys())}")
+    if regular_patient_ids:
+        report_content.append(f"Patients included: Only regular cycle patients ({len(regular_patient_ids)} patients)")
+    else:
+        report_content.append("Patients included: All patients (no exclusion filter applied)")
     report_content.append("")
 
     # Model Performance
@@ -559,8 +620,11 @@ def main():
     print("=" * 80)
 
     try:
+        # Step 0: Load patient exclusion list
+        regular_patient_ids = load_and_filter_patients()
+
         # Step 1: Load and preprocess data
-        merged_data = load_and_preprocess_data()
+        merged_data = load_and_preprocess_data(regular_patient_ids)
         merged_data = convert_symptoms_to_numeric(merged_data)
         merged_data = create_interaction_features(merged_data)
 
@@ -589,7 +653,8 @@ def main():
         create_comprehensive_visualizations(results, importance_results, X_test, y_test)
 
         # Step 7: Generate report
-        report = generate_comprehensive_report(results, importance_results, analysis_data, predictors)
+        report = generate_comprehensive_report(results, importance_results, analysis_data, predictors,
+                                               regular_patient_ids)
 
         # Print summary
         print("\n" + "=" * 80)
