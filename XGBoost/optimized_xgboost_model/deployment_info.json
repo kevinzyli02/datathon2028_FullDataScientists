@@ -1,0 +1,32 @@
+{
+  "model_type": "XGBoost MultiOutput Regressor",
+  "features_used": [
+    "stress_score",
+    "lightly",
+    "total_activity",
+    "very",
+    "moderately",
+    "minutesawake",
+    "stress_sleep_ratio",
+    "intense_ratio",
+    "resting_hr",
+    "minutesasleep"
+  ],
+  "targets": [
+    "lh",
+    "estrogen",
+    "pdg"
+  ],
+  "training_date": "2025-11-09 18:12:04",
+  "performance": {
+    "lh": {
+      "r2": 0.5942217408571177
+    },
+    "estrogen": {
+      "r2": 0.7354649699080382
+    },
+    "pdg": {
+      "r2": 0.6913041740604332
+    }
+  }
+}

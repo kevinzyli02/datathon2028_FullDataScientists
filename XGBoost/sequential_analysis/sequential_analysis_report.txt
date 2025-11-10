@@ -1,0 +1,40 @@
+
+SEQUENTIAL VARIABLE ANALYSIS REPORT
+====================================
+
+PROCESSING SUMMARY:
+- Files processed: 9
+- Final variables selected: 31
+- Total samples in final model: 107457
+
+FINAL MODEL PERFORMANCE:
+- Overall Train R²: 0.863
+- Overall Test R²:  0.855
+
+TARGET-SPECIFIC PERFORMANCE:
+- lh: Train R² = 0.839, Test R² = 0.823
+- estrogen: Train R² = 0.900, Test R² = 0.896
+- pdg: Train R² = 0.852, Test R² = 0.845
+
+TOP 10 VARIABLES:
+ 5. fatigue                        : 19.12%
+ 7. height_2024                    :  9.10%
+14. max_exertion_points            :  8.77%
+27. timeinbed                      :  7.90%
+ 6. height_2022                    :  6.50%
+ 3. error                          :  6.22%
+12. lightly                        :  5.32%
+30. weight_2022                    :  5.08%
+25. sleep_points                   :  4.45%
+15. max_responsiveness_points      :  4.20%
+
+PROCESSING HISTORY:
+- hormones_and_selfreport.csv: 3 variables
+- active_minutes.csv: 6 variables
+- sleep.csv: 15 variables
+- stress_score.csv: 22 variables
+- resting_heart_rate.csv: 25 variables
+- glucose.csv: 25 variables
+- heart_rate_variability_details.csv: 28 variables
+- computed_temperature.csv: 28 variables
+- height_and_weight.csv: 31 variables

@@ -1,0 +1,24 @@
+
+MEMORY-EFFICIENT MODELING RESULTS
+==================================
+
+Best Model: Top_5_Features
+Average Test R²: 0.224
+Number of Features: 5
+
+Top Features:
+  - lightly
+  - stress_score
+  - study_interval
+  - very
+  - moderately
+
+Individual Target Performance:
+  - lh: Train R² = 0.111, Test R² = 0.111
+  - estrogen: Train R² = 0.217, Test R² = 0.218
+  - pdg: Train R² = 0.344, Test R² = 0.344
+
+Recommendations:
+- Use the top 5 features for your final model
+- Focus on features with highest correlation to targets
+- Consider collecting more data for lower-performing targets

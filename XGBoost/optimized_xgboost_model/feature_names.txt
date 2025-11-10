@@ -1,0 +1,10 @@
+stress_score
+lightly
+total_activity
+very
+moderately
+minutesawake
+stress_sleep_ratio
+intense_ratio
+resting_hr
+minutesasleep
