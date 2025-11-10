@@ -27,4 +27,4 @@ data/altitude.csv
 data/active_zone_minutes.csv
 data/active_minutes.csv
 .DS_Store
-.venv/
+venv/
