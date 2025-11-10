@@ -19,16 +19,16 @@ TARGET-SPECIFIC PERFORMANCE:
 - pdg: Train R² = 0.875, Test R² = 0.867
 
 TOP 10 MOST IMPORTANT VARIABLES:
-35. weight_2022                              : 12.07%
- 7. error                                    : 10.27%
- 4. duration                                 :  9.50%
-11. flow_color                               :  8.42%
-24. revitalization_score                     :  8.03%
-33. study_interval_stress_score              :  6.81%
-17. minutesafterwakeup                       :  6.68%
- 9. exertion_points                          :  5.96%
-12. flow_volume                              :  5.67%
-25. rmssd_mean                               :  5.30%
+15. max_responsiveness_points                : 10.90%
+30. study_interval                           :  9.20%
+20. phase                                    :  8.85%
+ 2. composition_score                        :  8.26%
+16. minutesafterwakeup                       :  7.89%
+ 7. fatigue                                  :  7.39%
+ 3. duration                                 :  5.68%
+33. study_interval_sleep                     :  5.39%
+32. study_interval_resting_heart_rate        :  5.37%
+12. indigestion                              :  5.20%
 
 HOURLY AGGREGATION FEATURES:
 - Count of hourly mean features: 0
