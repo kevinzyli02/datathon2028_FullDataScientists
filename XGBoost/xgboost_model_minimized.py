@@ -23,11 +23,12 @@ warnings.filterwarnings('ignore')
 # CONFIGURATION
 # =============================================================================
 
-DATA_DIR = Path('/Users/kevin/Documents/GitHub/datathon2028_FullDataScientists/data')
+DATA_DIR = Path(r"C:\Users\kevin\Downloads\mcphases\mcphases-a-dataset-of-physiological-hormonal-and-self-reported-events-and-symptoms-for-menstrual-health-tracking-with-wearables-1.0.0")
 OUTPUT_DIR = Path('robust_sequential_analysis')
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
 # List of files to process sequentially
+
 ALL_FILES = ['hormones_and_selfreport.csv',  # Base file first
 
              # Original key files
@@ -37,7 +38,7 @@ ALL_FILES = ['hormones_and_selfreport.csv',  # Base file first
              # 'steps.csv',
              'resting_heart_rate.csv',
              'glucose.csv',
-             #'heart_rate_variability_details.csv',
+             # 'heart_rate_variability_details.csv',
              'computed_temperature.csv',
              # 'demographic_vo2_max.csv',
              'height_and_weight.csv',
@@ -49,7 +50,7 @@ ALL_FILES = ['hormones_and_selfreport.csv',  # Base file first
              # 'estimated_oxygen_variation.csv',
              'exercise.csv',
              'respiratory_rate_summary.csv',
-                'sleep_score.csv',
+             'sleep_score.csv',
              'wrist_temperature.csv'
              ]
 TARGETS = ['lh', 'estrogen', 'pdg']
