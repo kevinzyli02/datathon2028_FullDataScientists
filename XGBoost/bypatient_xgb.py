@@ -1,5 +1,5 @@
 # =============================================================================
-# COMPREHENSIVE MODEL WITH ALL FEATURES with 20% sampling not by patient
+# COMPREHENSIVE MODEL WITH PATIENT-WISE 80/20 SPLIT
 # =============================================================================
 
 import pandas as pd
@@ -24,7 +24,7 @@ import gc
 import time
 
 DATA_DIR = Path(r"C:\Users\kevin\PycharmProjects\datathon2028_FullDataScientists\data")
-OUTPUT_DIR = Path('comprehensive_model_analysis')
+OUTPUT_DIR = Path('patient_wise_model_analysis')
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
 # Use all available files for comprehensive analysis
@@ -192,6 +192,54 @@ def preprocess_data(df):
 
 
 # =============================================================================
+# PATIENT-WISE TRAIN-TEST SPLIT
+# =============================================================================
+
+def patient_wise_train_test_split(df, test_size=0.2, random_state=42):
+    """
+    Split data by patient ID to prevent data leakage
+    All records from a patient go to either train or test
+    """
+    print(f"\n🎯 Performing PATIENT-WISE 80/20 split...")
+
+    # Get unique patient IDs
+    patient_ids = df['id'].unique()
+    n_patients = len(patient_ids)
+
+    print(f"   Total patients: {n_patients}")
+    print(f"   Total records: {len(df)}")
+
+    # Split patient IDs
+    train_patients, test_patients = train_test_split(
+        patient_ids,
+        test_size=test_size,
+        random_state=random_state
+    )
+
+    # Split data based on patient IDs
+    train_data = df[df['id'].isin(train_patients)]
+    test_data = df[df['id'].isin(test_patients)]
+
+    print(f"   Training patients: {len(train_patients)} ({len(train_patients) / n_patients * 100:.1f}%)")
+    print(f"   Testing patients:  {len(test_patients)} ({len(test_patients) / n_patients * 100:.1f}%)")
+    print(f"   Training records:  {len(train_data)} ({len(train_data) / len(df) * 100:.1f}%)")
+    print(f"   Testing records:   {len(test_data)} ({len(test_data) / len(df) * 100:.1f}%)")
+
+    # Check for patient overlap
+    train_ids = set(train_data['id'].unique())
+    test_ids = set(test_data['id'].unique())
+    overlap = train_ids.intersection(test_ids)
+
+    if overlap:
+        print(f"❌ ERROR: Patient overlap detected! {len(overlap)} patients in both sets")
+        raise ValueError("Patient overlap in train/test split")
+    else:
+        print("✅ No patient overlap - split is valid")
+
+    return train_data, test_data, train_patients, test_patients
+
+
+# =============================================================================
 # COMPREHENSIVE FEATURE PROCESSING (ALL FEATURES)
 # =============================================================================
 
@@ -285,12 +333,13 @@ def categorize_features(features):
 # COMPREHENSIVE REGRESSION STATISTICS
 # =============================================================================
 
-def calculate_comprehensive_metrics(y_true, y_pred, model_name, target_name, n_features):
+def calculate_comprehensive_metrics(y_true, y_pred, model_name, target_name, n_features, n_patients):
     """Calculate comprehensive regression statistics"""
 
     print(f"\n📊 REGRESSION STATISTICS - {model_name} - {target_name}")
     print("=" * 50)
     print(f"   Features used: {n_features}")
+    print(f"   Patients in set: {n_patients}")
 
     # Basic error metrics
     mae = mean_absolute_error(y_true, y_pred)
@@ -336,6 +385,7 @@ def calculate_comprehensive_metrics(y_true, y_pred, model_name, target_name, n_f
         'model': model_name,
         'target': target_name,
         'n_features': n_features,
+        'n_patients': n_patients,
         'error_metrics': {
             'mae': mae,
             'mse': mse,
@@ -356,12 +406,13 @@ def calculate_comprehensive_metrics(y_true, y_pred, model_name, target_name, n_f
     return results
 
 
-def create_regression_diagnostics(y_true, y_pred, model_name, target_name, n_features):
+def create_regression_diagnostics(y_true, y_pred, model_name, target_name, n_features, n_patients):
     """Create comprehensive regression diagnostic plots"""
 
     fig, axes = plt.subplots(2, 2, figsize=(15, 12))
-    fig.suptitle(f'Regression Diagnostics: {model_name} - {target_name}\nFeatures: {n_features}',
-                 fontsize=16, fontweight='bold')
+    fig.suptitle(
+        f'Regression Diagnostics: {model_name} - {target_name}\nFeatures: {n_features}, Patients: {n_patients}',
+        fontsize=16, fontweight='bold')
 
     # Plot 1: True vs Predicted
     axes[0, 0].scatter(y_true, y_pred, alpha=0.6, s=50)
@@ -412,14 +463,14 @@ def create_regression_diagnostics(y_true, y_pred, model_name, target_name, n_fea
 
 
 # =============================================================================
-# COMPREHENSIVE MODEL TRAINING WITH ALL FEATURES
+# COMPREHENSIVE MODEL TRAINING WITH PATIENT-WISE SPLIT
 # =============================================================================
 
 def train_comprehensive_models(df, feature_sets, targets):
-    """Train models using ALL available features with proper 80/20 split"""
+    """Train models using ALL available features with PATIENT-WISE 80/20 split"""
 
-    print("\n🚀 TRAINING COMPREHENSIVE MODELS WITH ALL FEATURES")
-    print("=" * 70)
+    print("\n🚀 TRAINING COMPREHENSIVE MODELS WITH PATIENT-WISE 80/20 SPLIT")
+    print("=" * 80)
 
     all_results = {}
 
@@ -453,7 +504,7 @@ def train_comprehensive_models(df, feature_sets, targets):
             continue
 
         print(f"\n🎯 TARGET: {target.upper()}")
-        print("-" * 50)
+        print("=" * 50)
 
         # Get ALL features for this target
         all_features = feature_sets[target]
@@ -464,23 +515,24 @@ def train_comprehensive_models(df, feature_sets, targets):
 
         # Prepare data
         target_data = df.dropna(subset=[target]).copy()
-        X = target_data[all_features].copy()
-        y = target_data[target].values
 
-        print(f"📊 Dataset: {X.shape}")
+        print(f"📊 Dataset before split: {target_data.shape}")
         print(f"🎯 Using ALL {len(all_features)} available features")
 
-        # 80/20 Train-Test Split
-        X_train, X_test, y_train, y_test = train_test_split(
-            X, y,
-            test_size=TEST_SIZE,
-            random_state=RANDOM_STATE,
-            shuffle=True
+        # PATIENT-WISE 80/20 Split
+        train_data, test_data, train_patients, test_patients = patient_wise_train_test_split(
+            target_data, test_size=TEST_SIZE, random_state=RANDOM_STATE
         )
 
-        print(f"🔀 Split: Train={X_train.shape}, Test={X_test.shape}")
-        print(f"   Training: {len(X_train):,} samples ({(1 - TEST_SIZE) * 100:.0f}%)")
-        print(f"   Testing:  {len(X_test):,} samples ({TEST_SIZE * 100:.0f}%)")
+        # Prepare features and targets
+        X_train = train_data[all_features].copy()
+        y_train = train_data[target].values
+        X_test = test_data[all_features].copy()
+        y_test = test_data[target].values
+
+        print(f"🔀 Final split:")
+        print(f"   Training: {X_train.shape} ({len(train_patients)} patients)")
+        print(f"   Testing:  {X_test.shape} ({len(test_patients)} patients)")
 
         # Handle missing values
         imputer = SimpleImputer(strategy='median')
@@ -509,12 +561,15 @@ def train_comprehensive_models(df, feature_sets, targets):
 
                 # Calculate comprehensive metrics
                 train_metrics = calculate_comprehensive_metrics(y_train, y_pred_train,
-                                                                f"{model_name} (Train)", target, len(all_features))
+                                                                f"{model_name} (Train)", target,
+                                                                len(all_features), len(train_patients))
                 test_metrics = calculate_comprehensive_metrics(y_test, y_pred_test,
-                                                               f"{model_name} (Test)", target, len(all_features))
+                                                               f"{model_name} (Test)", target,
+                                                               len(all_features), len(test_patients))
 
                 # Create diagnostic plots for test set
-                create_regression_diagnostics(y_test, y_pred_test, model_name, target, len(all_features))
+                create_regression_diagnostics(y_test, y_pred_test, model_name, target,
+                                              len(all_features), len(test_patients))
 
                 # Store results
                 target_results[model_name] = {
@@ -522,6 +577,8 @@ def train_comprehensive_models(df, feature_sets, targets):
                     'train_metrics': train_metrics,
                     'test_metrics': test_metrics,
                     'features_used': all_features,
+                    'train_patients': train_patients,
+                    'test_patients': test_patients,
                     'model': model
                 }
 
@@ -551,12 +608,12 @@ def create_comprehensive_report(results, feature_sets):
     print("=" * 60)
 
     # Save detailed results with UTF-8 encoding
-    with open(OUTPUT_DIR / "comprehensive_model_report.txt", 'w', encoding='utf-8') as f:
-        f.write("COMPREHENSIVE MODEL ANALYSIS - ALL FEATURES\n")
-        f.write("=" * 70 + "\n\n")
-        f.write("MODEL EVALUATION WITH 80/20 TRAIN-TEST SPLIT\n")
+    with open(OUTPUT_DIR / "patient_wise_model_report.txt", 'w', encoding='utf-8') as f:
+        f.write("COMPREHENSIVE MODEL ANALYSIS - PATIENT-WISE 80/20 SPLIT\n")
+        f.write("=" * 80 + "\n\n")
+        f.write("MODEL EVALUATION WITH PATIENT-WISE TRAIN-TEST SPLIT\n")
         f.write(f"Sample Size: {SAMPLE_SIZE:,}\n")
-        f.write(f"Test Size: {TEST_SIZE * 100}%\n")
+        f.write(f"Test Size: {TEST_SIZE * 100}% of PATIENTS\n")
         f.write(f"Random State: {RANDOM_STATE}\n\n")
 
         for target, target_results in results.items():
@@ -571,8 +628,8 @@ def create_comprehensive_report(results, feature_sets):
                     f.write(f"  {category}: {count}\n")
                 f.write("\n")
 
-            f.write("MODEL PERFORMANCE COMPARISON (TEST SET):\n")
-            f.write("-" * 40 + "\n")
+            f.write("MODEL PERFORMANCE COMPARISON (TEST SET - UNSEEN PATIENTS):\n")
+            f.write("-" * 60 + "\n")
 
             # Create comparison table
             comparison_data = []
@@ -581,6 +638,7 @@ def create_comprehensive_report(results, feature_sets):
                     metrics = result['test_metrics']
                     comparison_data.append({
                         'Model': model_name,
+                        'Patients': metrics['n_patients'],
                         'Features': metrics['n_features'],
                         'R2': metrics['correlation_metrics']['r2'],
                         'Pearson_r': metrics['correlation_metrics']['pearson_correlation'],
@@ -594,31 +652,6 @@ def create_comprehensive_report(results, feature_sets):
                 comp_df = pd.DataFrame(comparison_data)
                 f.write(comp_df.to_string(index=False, float_format='%.4f'))
                 f.write("\n\n")
-
-            f.write("DETAILED METRICS BY MODEL:\n")
-            f.write("-" * 30 + "\n")
-
-            for model_name, result in target_results.items():
-                if result and 'test_metrics' in result:
-                    f.write(f"\n{model_name}:\n")
-                    metrics = result['test_metrics']
-
-                    f.write("  Error Metrics:\n")
-                    f.write(f"    MAE:  {metrics['error_metrics']['mae']:.4f}\n")
-                    f.write(f"    MSE:  {metrics['error_metrics']['mse']:.4f}\n")
-                    f.write(f"    RMSE: {metrics['error_metrics']['rmse']:.4f}\n")
-                    f.write(f"    MAPE: {metrics['error_metrics']['mape']:.2f}%\n")
-
-                    f.write("  Correlation Metrics:\n")
-                    f.write(f"    R2:        {metrics['correlation_metrics']['r2']:.4f}\n")
-                    f.write(f"    Pearson:   {metrics['correlation_metrics']['pearson_correlation']:.4f}\n")
-                    f.write(f"    Spearman:  {metrics['correlation_metrics']['spearman_correlation']:.4f}\n")
-
-                    f.write("  Data Statistics:\n")
-                    f.write(f"    True Mean: {metrics['distribution_stats']['true_mean']:.4f}\n")
-                    f.write(f"    True Std:  {metrics['distribution_stats']['true_std']:.4f}\n")
-
-                    f.write(f"  Training Time: {result['training_time']:.2f}s\n")
 
     # Also save results as CSV for easy analysis
     save_results_csv(results, feature_sets)
@@ -641,6 +674,7 @@ def save_results_csv(results, feature_sets):
                 performance_data.append({
                     'target': target,
                     'model': model_name,
+                    'n_patients': metrics['n_patients'],
                     'n_features': metrics['n_features'],
                     'r2': metrics['correlation_metrics']['r2'],
                     'pearson_r': metrics['correlation_metrics']['pearson_correlation'],
@@ -654,8 +688,8 @@ def save_results_csv(results, feature_sets):
 
     if performance_data:
         perf_df = pd.DataFrame(performance_data)
-        perf_df.to_csv(OUTPUT_DIR / "model_performance_comparison.csv", index=False)
-        print("✅ Model performance comparison saved as CSV")
+        perf_df.to_csv(OUTPUT_DIR / "patient_wise_performance_comparison.csv", index=False)
+        print("✅ Patient-wise performance comparison saved as CSV")
 
     # Save feature information
     feature_data = []
@@ -680,14 +714,14 @@ def create_performance_comparison_plot(results):
         models = []
         r2_scores = []
         rmse_scores = []
-        n_features_list = []
+        n_patients_list = []
 
         for model_name, result in target_results.items():
             if result and 'test_metrics' in result:
                 models.append(model_name)
                 r2_scores.append(result['test_metrics']['correlation_metrics']['r2'])
                 rmse_scores.append(result['test_metrics']['error_metrics']['rmse'])
-                n_features_list.append(result['test_metrics']['n_features'])
+                n_patients_list.append(result['test_metrics']['n_patients'])
 
         if models:
             fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(15, 6))
@@ -695,7 +729,7 @@ def create_performance_comparison_plot(results):
             # R² comparison
             bars1 = ax1.bar(models, r2_scores, color=['skyblue', 'lightgreen', 'lightcoral'])
             ax1.set_ylabel('R² Score')
-            ax1.set_title(f'Model Comparison - {target.upper()}\nFeatures: {n_features_list[0]}')
+            ax1.set_title(f'Model Comparison - {target.upper()}\nTest Patients: {n_patients_list[0]}')
             ax1.set_ylim(0, 1)
 
             # Add value labels on bars
@@ -706,7 +740,7 @@ def create_performance_comparison_plot(results):
             # RMSE comparison
             bars2 = ax2.bar(models, rmse_scores, color=['skyblue', 'lightgreen', 'lightcoral'])
             ax2.set_ylabel('RMSE')
-            ax2.set_title(f'Model Comparison - {target.upper()}\nFeatures: {n_features_list[0]}')
+            ax2.set_title(f'Model Comparison - {target.upper()}\nTest Patients: {n_patients_list[0]}')
 
             # Add value labels on bars
             for bar, score in zip(bars2, rmse_scores):
@@ -714,7 +748,7 @@ def create_performance_comparison_plot(results):
                          f'{score:.4f}', ha='center', va='bottom')
 
             plt.tight_layout()
-            plt.savefig(OUTPUT_DIR / f'model_comparison_{target}.png', dpi=300, bbox_inches='tight')
+            plt.savefig(OUTPUT_DIR / f'patient_wise_comparison_{target}.png', dpi=300, bbox_inches='tight')
             plt.close()
 
 
@@ -723,13 +757,13 @@ def create_performance_comparison_plot(results):
 # =============================================================================
 
 def main():
-    print("🚀 COMPREHENSIVE MODEL ANALYSIS WITH ALL FEATURES")
-    print("=" * 70)
+    print("🚀 COMPREHENSIVE MODEL ANALYSIS WITH PATIENT-WISE 80/20 SPLIT")
+    print("=" * 80)
     print(f"📊 Models: RandomForest, XGBoost, LightGBM")
-    print(f"🎯 Train-Test Split: 80%-20%")
+    print(f"🎯 Train-Test Split: 80%-20% OF PATIENTS (not records)")
     print(f"📈 Sample Size: {SAMPLE_SIZE:,}")
     print(f"📁 Files: {len(COMPREHENSIVE_FILES)}")
-    print("=" * 70)
+    print("=" * 80)
 
     try:
         # Step 1: Load comprehensive dataset
@@ -741,13 +775,13 @@ def main():
         # Step 2: Get ALL available features for each target
         feature_sets = get_all_features(df, TARGETS)
 
-        # Step 3: Train comprehensive models with ALL features and 80/20 split
+        # Step 3: Train comprehensive models with PATIENT-WISE split
         results = train_comprehensive_models(df, feature_sets, TARGETS)
 
         # Step 4: Create comprehensive report
         create_comprehensive_report(results, feature_sets)
 
-        print(f"\n✅ COMPREHENSIVE MODEL ANALYSIS COMPLETE!")
+        print(f"\n✅ PATIENT-WISE MODEL ANALYSIS COMPLETE!")
         print(f"📁 Results saved to: {OUTPUT_DIR}")
         print(f"📊 Diagnostic plots and comprehensive statistics generated")
 
@@ -764,7 +798,9 @@ def main():
                     best_r2 = result['test_metrics']['correlation_metrics']['r2']
                     best_model = model_name
             if best_model:
+                test_patients = target_results[best_model]['test_metrics']['n_patients']
                 print(f"     Best Model: {best_model} (R² = {best_r2:.4f})")
+                print(f"     Test Patients: {test_patients}")
 
     except Exception as e:
         print(f"❌ Error in main execution: {e}")
