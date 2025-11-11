@@ -1,0 +1,13 @@
+
+FEATURE SELECTION COMPARISON REPORT
+===================================
+
+Total methods evaluated: 4
+
+Performance Ranking:
+4. union: 2 features, Avg R² = 0.000
+3. correlation_fixed: 1 features, Avg R² = 0.000
+1. rfe_fixed: 2 features, Avg R² = -0.008
+2. random_forest_fixed: 2 features, Avg R² = -0.009
+
+Output Directory: optimized_sequential_analysis

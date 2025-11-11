@@ -1,0 +1,4 @@
+target,type,train_score,test_score,metric
+phase,classification,0.9491937265297107,0.7517667844522968,accuracy
+menstruation_start,regression,0.9786721515253654,0.9347785425269716,r2
+glucose,regression,0.9999999990440263,0.9999999990484199,r2
