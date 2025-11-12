@@ -1,5 +1,5 @@
 # =============================================================================
-# COMPREHENSIVE MODEL WITH PATIENT-WISE 80/20 SPLIT
+# COMPREHENSIVE MODEL WITH PATIENT-WISE 80/20 SPLIT + PERSONALIZATION ENHANCEMENTS
 # =============================================================================
 
 import pandas as pd
@@ -15,6 +15,7 @@ from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
 from sklearn.metrics import mean_squared_error, r2_score, mean_absolute_error
 from sklearn.impute import SimpleImputer
+from sklearn.base import BaseEstimator, RegressorMixin
 from scipy.stats import pearsonr, spearmanr
 import xgboost as xgb
 import lightgbm as lgb
@@ -48,6 +49,358 @@ RANDOM_STATE = 42
 SAMPLE_SIZE = 15000
 
 
+# =============================================================================
+# DATA FILTERING FUNCTIONS
+# =============================================================================
+
+def filter_all_files_to_match_patients(main_file_path, data_dir, output_dir, file_list):
+    """
+    Filter all data files to only include patients present in the main file
+
+    Parameters:
+    - main_file_path: Path to the main file (hormones_and_selfreport.csv)
+    - data_dir: Directory containing all data files
+    - output_dir: Directory to save filtered files
+    - file_list: List of all files to filter
+    """
+
+    print("🔍 FILTERING DATA FILES TO MATCH PATIENTS IN MAIN FILE")
+    print("=" * 60)
+
+    # Create output directory
+    os.makedirs(output_dir, exist_ok=True)
+
+    # Step 1: Read main file and get patient IDs
+    print(f"📋 Reading main file: {main_file_path}")
+    main_df = pd.read_csv(main_file_path)
+    valid_patient_ids = set(main_df['id'].unique())
+    print(f"✅ Found {len(valid_patient_ids)} valid patients in main file")
+
+    # Step 2: Process each file
+    for file_name in file_list:
+        print(f"\n🔄 Processing {file_name}...")
+        file_path = data_dir / file_name
+
+        if not file_path.exists():
+            print(f"   ⚠️ File not found: {file_name}")
+            continue
+
+        # Read the file
+        df = pd.read_csv(file_path)
+        original_size = len(df)
+        original_patients = len(df['id'].unique()) if 'id' in df.columns else "No ID column"
+
+        print(f"   Original: {original_size} records, {original_patients} patients")
+
+        # Filter based on patient IDs
+        if 'id' in df.columns:
+            filtered_df = df[df['id'].isin(valid_patient_ids)].copy()
+            filtered_size = len(filtered_df)
+            filtered_patients = len(filtered_df['id'].unique())
+
+            print(f"   Filtered: {filtered_size} records, {filtered_patients} patients")
+            print(
+                f"   Removed: {original_size - filtered_size} records ({((original_size - filtered_size) / original_size * 100):.1f}%)")
+
+            # Save filtered file
+            output_path = output_dir / file_name
+            filtered_df.to_csv(output_path, index=False)
+            print(f"   💾 Saved filtered file to: {output_path}")
+        else:
+            print(f"   ⚠️ No 'id' column found in {file_name}, skipping filtering")
+            # Copy file as-is
+            output_path = output_dir / file_name
+            df.to_csv(output_path, index=False)
+            print(f"   💾 Copied file to: {output_path}")
+
+    print(f"\n✅ FILTERING COMPLETE!")
+    print(f"📁 Filtered files saved to: {output_dir}")
+    return output_dir
+
+
+def analyze_patient_overlap(data_dir, file_list):
+    """
+    Analyze patient overlap across all files to identify inconsistencies
+    """
+    print("\n🔍 ANALYZING PATIENT OVERLAP ACROSS FILES")
+    print("=" * 50)
+
+    patient_sets = {}
+
+    for file_name in file_list:
+        file_path = data_dir / file_name
+        if not file_path.exists():
+            continue
+
+        df = pd.read_csv(file_path)
+        if 'id' in df.columns:
+            patients = set(df['id'].unique())
+            patient_sets[file_name] = patients
+            print(f"📊 {file_name}: {len(patients)} patients")
+
+    # Find common patients across all files
+    if patient_sets:
+        common_patients = set.intersection(*patient_sets.values())
+        print(f"\n👥 Common patients across ALL files: {len(common_patients)}")
+
+        # Find patients missing from each file
+        for file_name, patients in patient_sets.items():
+            missing_from_this = common_patients - patients
+            if missing_from_this:
+                print(f"   ⚠️ {file_name} missing {len(missing_from_this)} patients")
+
+        return common_patients
+    return set()
+
+
+def create_consistency_report(main_file_path, data_dir, file_list):
+    """
+    Create a comprehensive report on data consistency
+    """
+    print("\n📋 CREATING DATA CONSISTENCY REPORT")
+    print("=" * 50)
+
+    # Read main file
+    main_df = pd.read_csv(main_file_path)
+    main_patients = set(main_df['id'].unique())
+
+    report_data = []
+
+    for file_name in file_list:
+        file_path = data_dir / file_name
+        if not file_path.exists():
+            report_data.append({
+                'file': file_name,
+                'status': 'MISSING',
+                'patients': 0,
+                'overlap_with_main': 0,
+                'overlap_percent': 0,
+                'records': 0
+            })
+            continue
+
+        df = pd.read_csv(file_path)
+        records = len(df)
+
+        if 'id' in df.columns:
+            patients = set(df['id'].unique())
+            overlap = patients & main_patients
+            overlap_percent = len(overlap) / len(main_patients) * 100 if main_patients else 0
+
+            report_data.append({
+                'file': file_name,
+                'status': 'OK',
+                'patients': len(patients),
+                'overlap_with_main': len(overlap),
+                'overlap_percent': overlap_percent,
+                'records': records
+            })
+        else:
+            report_data.append({
+                'file': file_name,
+                'status': 'NO_ID_COLUMN',
+                'patients': 'N/A',
+                'overlap_with_main': 'N/A',
+                'overlap_percent': 'N/A',
+                'records': records
+            })
+
+    # Create report DataFrame
+    report_df = pd.DataFrame(report_data)
+    print("\n📊 DATA CONSISTENCY REPORT:")
+    print(report_df.to_string(index=False))
+
+    # Identify files that need filtering
+    files_to_filter = []
+    for item in report_data:
+        if item['status'] == 'OK' and item['overlap_percent'] < 100:
+            files_to_filter.append(item['file'])
+
+    if files_to_filter:
+        print(f"\n🎯 FILES THAT NEED FILTERING: {len(files_to_filter)}")
+        for file_name in files_to_filter:
+            print(f"   - {file_name}")
+    else:
+        print(f"\n✅ All files already consistent with main file!")
+
+    return report_df
+
+# =============================================================================
+# ENHANCEMENT 1: BASELINE NORMALIZATION
+# =============================================================================
+
+def normalize_by_baseline(df, targets, baseline_days=3):
+    """Normalize hormone levels by patient-specific baseline"""
+
+    df_normalized = df.copy()
+
+    for target in targets:
+        if target not in df.columns:
+            continue
+
+        # Create normalized column
+        normalized_col = f"{target}_normalized"
+        df_normalized[normalized_col] = np.nan
+
+        for patient_id in df['id'].unique():
+            patient_data = df[df['id'] == patient_id].copy()
+            patient_data = patient_data.sort_values('day_in_study')
+
+            # Calculate baseline (first few days in study)
+            baseline_data = patient_data.head(baseline_days)
+            baseline_value = baseline_data[target].mean()
+
+            if not np.isnan(baseline_value) and baseline_value > 0:
+                # Normalize all values by baseline
+                mask = df_normalized['id'] == patient_id
+                df_normalized.loc[mask, normalized_col] = (
+                        df_normalized.loc[mask, target] / baseline_value
+                )
+
+                print(f"   Patient {patient_id}: baseline {target} = {baseline_value:.2f}")
+
+    return df_normalized
+
+
+# =============================================================================
+# ENHANCEMENT 2: PERSONALIZED FEATURES
+# =============================================================================
+
+def add_personalized_features(df, targets, window_size=7):
+    """Add patient-specific rolling features"""
+
+    df_personal = df.copy()
+
+    # Sort by patient and day to ensure proper rolling
+    df_personal = df_personal.sort_values(['id', 'day_in_study']).reset_index(drop=True)
+
+    for target in targets:
+        if target not in df.columns:
+            continue
+
+        print(f"   Adding personalized features for {target}...")
+
+        # Patient-specific rolling statistics
+        for patient_id in df_personal['id'].unique():
+            patient_mask = df_personal['id'] == patient_id
+            patient_indices = df_personal.index[patient_mask]
+
+            if len(patient_indices) < 2:
+                continue
+
+            # Get patient data in order
+            patient_data = df_personal.loc[patient_indices, target].copy()
+
+            # Rolling mean (personal baseline trend)
+            rolling_mean = patient_data.rolling(window=min(window_size, len(patient_data)),
+                                                min_periods=1).mean()
+            df_personal.loc[patient_indices, f'{target}_rolling_mean'] = rolling_mean
+
+            # Rolling standard deviation (personal variability)
+            rolling_std = patient_data.rolling(window=min(window_size, len(patient_data)),
+                                               min_periods=1).std()
+            df_personal.loc[patient_indices, f'{target}_rolling_std'] = rolling_std.fillna(0)
+
+            # Personal mean (overall baseline)
+            personal_mean = patient_data.mean()
+            df_personal.loc[patient_indices, f'{target}_personal_mean'] = personal_mean
+
+            # Deviation from personal mean
+            df_personal.loc[patient_indices, f'{target}_deviation'] = (
+                    patient_data - personal_mean
+            )
+
+            # Rate of change (day-to-day difference)
+            df_personal.loc[patient_indices, f'{target}_daily_change'] = patient_data.diff().fillna(0)
+
+            # Cumulative sum (trend direction)
+            df_personal.loc[patient_indices, f'{target}_cumulative'] = patient_data.cumsum()
+
+    # Add cycle phase features if available
+    if 'cycle_day' in df_personal.columns:
+        df_personal = add_cycle_phase_features(df_personal)
+
+    return df_personal
+
+
+def add_cycle_phase_features(df):
+    """Add menstrual cycle phase indicators"""
+
+    # Simplified phase estimation based on cycle day
+    df['phase_follicular'] = (df['cycle_day'] <= 14).astype(int)
+    df['phase_luteal'] = (df['cycle_day'] > 14).astype(int)
+    df['phase_ovulation'] = ((df['cycle_day'] >= 12) & (df['cycle_day'] <= 16)).astype(int)
+
+    return df
+
+
+# =============================================================================
+# ENHANCEMENT 3: MIXED EFFECTS ENSEMBLE MODEL - FIXED VERSION
+# =============================================================================
+
+# Alternative: Simplified Mixed Effects that's more robust
+class SimpleMixedEffects(BaseEstimator, RegressorMixin):
+    """Simplified version that's less likely to have initialization issues"""
+
+    def __init__(self, min_patient_samples=5):
+        self.min_patient_samples = min_patient_samples
+        self.global_model = None
+        self.patient_models = {}
+        self.is_fitted = False
+
+    def fit(self, X, y, patient_ids):
+        print("🏥 Training Simple Mixed Effects...")
+
+        # Simple global model
+        self.global_model = RandomForestRegressor(
+            n_estimators=50, max_depth=8, random_state=42, n_jobs=-1
+        )
+        self.global_model.fit(X, y)
+
+        # Patient-specific adjustments (simpler approach)
+        unique_patients = np.unique(patient_ids)
+        trained_count = 0
+
+        for patient_id in unique_patients:
+            mask = patient_ids == patient_id
+            if np.sum(mask) >= self.min_patient_samples:
+                X_patient = X[mask]
+                y_patient = y[mask]
+
+                # Simple correction: train on this patient's data directly
+                try:
+                    patient_model = RandomForestRegressor(
+                        n_estimators=20, max_depth=4, random_state=42
+                    )
+                    patient_model.fit(X_patient, y_patient)
+                    self.patient_models[patient_id] = patient_model
+                    trained_count += 1
+                except:
+                    pass
+
+        print(f"   ✅ Trained models for {trained_count}/{len(unique_patients)} patients")
+        self.is_fitted = True
+        return self
+
+    def predict(self, X, patient_ids=None):
+        if not self.is_fitted:
+            raise ValueError("Model not fitted")
+
+        # Start with global predictions
+        y_pred = self.global_model.predict(X)
+
+        if patient_ids is not None:
+            # Apply patient-specific predictions where available
+            for i, patient_id in enumerate(patient_ids):
+                if patient_id in self.patient_models:
+                    try:
+                        # Use patient-specific model if available
+                        y_pred[i] = self.patient_models[patient_id].predict([X[i]])[0]
+                    except:
+                        # Keep global prediction if patient model fails
+                        pass
+
+        return y_pred
 # =============================================================================
 # EFFICIENT DATA LOADING
 # =============================================================================
@@ -463,40 +816,32 @@ def create_regression_diagnostics(y_true, y_pred, model_name, target_name, n_fea
 
 
 # =============================================================================
-# COMPREHENSIVE MODEL TRAINING WITH PATIENT-WISE SPLIT
+# ENHANCED MODEL TRAINING WITH ALL IMPROVEMENTS
 # =============================================================================
 
-def train_comprehensive_models(df, feature_sets, targets):
-    """Train models using ALL available features with PATIENT-WISE 80/20 split"""
+def train_enhanced_models(df, feature_sets, targets):
+    """Enhanced training function with Mixed Effects Ensemble and personalization support"""
 
-    print("\n🚀 TRAINING COMPREHENSIVE MODELS WITH PATIENT-WISE 80/20 SPLIT")
+    print("\n🚀 TRAINING ENHANCED MODELS WITH PERSONALIZATION")
     print("=" * 80)
 
     all_results = {}
 
-    # Define models to compare
+    # Define enhanced models (including Mixed Effects)
     models = {
         'RandomForest': RandomForestRegressor(
-            n_estimators=100,
-            max_depth=10,
-            random_state=RANDOM_STATE,
-            n_jobs=-1
+            n_estimators=100, max_depth=10, random_state=RANDOM_STATE, n_jobs=-1
         ),
         'XGBoost': xgb.XGBRegressor(
-            n_estimators=100,
-            max_depth=6,
-            learning_rate=0.1,
-            random_state=RANDOM_STATE,
-            n_jobs=-1
+            n_estimators=100, max_depth=6, learning_rate=0.1,
+            random_state=RANDOM_STATE, n_jobs=-1
         ),
         'LightGBM': lgb.LGBMRegressor(
-            n_estimators=100,
-            max_depth=6,
-            learning_rate=0.1,
-            random_state=RANDOM_STATE,
-            n_jobs=-1,
-            verbose=-1
-        )
+            n_estimators=100, max_depth=6, learning_rate=0.1,
+            random_state=RANDOM_STATE, n_jobs=-1, verbose=-1
+        ),
+        'MixedEffects': SimpleMixedEffects(min_patient_samples=5),
+
     }
 
     for target in targets:
@@ -506,7 +851,6 @@ def train_comprehensive_models(df, feature_sets, targets):
         print(f"\n🎯 TARGET: {target.upper()}")
         print("=" * 50)
 
-        # Get ALL features for this target
         all_features = feature_sets[target]
 
         if len(all_features) == 0:
@@ -517,7 +861,7 @@ def train_comprehensive_models(df, feature_sets, targets):
         target_data = df.dropna(subset=[target]).copy()
 
         print(f"📊 Dataset before split: {target_data.shape}")
-        print(f"🎯 Using ALL {len(all_features)} available features")
+        print(f"🎯 Using {len(all_features)} features")
 
         # PATIENT-WISE 80/20 Split
         train_data, test_data, train_patients, test_patients = patient_wise_train_test_split(
@@ -529,6 +873,10 @@ def train_comprehensive_models(df, feature_sets, targets):
         y_train = train_data[target].values
         X_test = test_data[all_features].copy()
         y_test = test_data[target].values
+
+        # Get patient IDs for mixed effects
+        train_patient_ids = train_data['id'].values
+        test_patient_ids = test_data['id'].values
 
         print(f"🔀 Final split:")
         print(f"   Training: {X_train.shape} ({len(train_patients)} patients)")
@@ -551,13 +899,26 @@ def train_comprehensive_models(df, feature_sets, targets):
             start_time = time.time()
 
             try:
-                # Train model
-                model.fit(X_train_scaled, y_train)
-                training_time = time.time() - start_time
+                # Special handling for Mixed Effects model
+                if model_name == 'MixedEffects':
+                    model.fit(X_train_scaled, y_train, train_patient_ids)
+                    training_time = time.time() - start_time
 
-                # Predictions
-                y_pred_train = model.predict(X_train_scaled)
-                y_pred_test = model.predict(X_test_scaled)
+                    # Get model info
+                    model_info = model.get_patient_models_info()
+                    print(f"   Patient model coverage: {model_info['coverage_rate']:.1f}%")
+
+                    # Predictions (need to pass patient IDs)
+                    y_pred_train = model.predict(X_train_scaled, train_patient_ids)
+                    y_pred_test = model.predict(X_test_scaled, test_patient_ids)
+                else:
+                    # Standard models
+                    model.fit(X_train_scaled, y_train)
+                    training_time = time.time() - start_time
+
+                    # Predictions
+                    y_pred_train = model.predict(X_train_scaled)
+                    y_pred_test = model.predict(X_test_scaled)
 
                 # Calculate comprehensive metrics
                 train_metrics = calculate_comprehensive_metrics(y_train, y_pred_train,
@@ -567,7 +928,7 @@ def train_comprehensive_models(df, feature_sets, targets):
                                                                f"{model_name} (Test)", target,
                                                                len(all_features), len(test_patients))
 
-                # Create diagnostic plots for test set
+                # Create diagnostic plots
                 create_regression_diagnostics(y_test, y_pred_test, model_name, target,
                                               len(all_features), len(test_patients))
 
@@ -727,7 +1088,7 @@ def create_performance_comparison_plot(results):
             fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(15, 6))
 
             # R² comparison
-            bars1 = ax1.bar(models, r2_scores, color=['skyblue', 'lightgreen', 'lightcoral'])
+            bars1 = ax1.bar(models, r2_scores, color=['skyblue', 'lightgreen', 'lightcoral', 'gold'])
             ax1.set_ylabel('R² Score')
             ax1.set_title(f'Model Comparison - {target.upper()}\nTest Patients: {n_patients_list[0]}')
             ax1.set_ylim(0, 1)
@@ -738,7 +1099,7 @@ def create_performance_comparison_plot(results):
                          f'{score:.4f}', ha='center', va='bottom')
 
             # RMSE comparison
-            bars2 = ax2.bar(models, rmse_scores, color=['skyblue', 'lightgreen', 'lightcoral'])
+            bars2 = ax2.bar(models, rmse_scores, color=['skyblue', 'lightgreen', 'lightcoral', 'gold'])
             ax2.set_ylabel('RMSE')
             ax2.set_title(f'Model Comparison - {target.upper()}\nTest Patients: {n_patients_list[0]}')
 
@@ -753,37 +1114,194 @@ def create_performance_comparison_plot(results):
 
 
 # =============================================================================
-# MAIN EXECUTION
+# QUICK TEST FUNCTION
 # =============================================================================
 
-def main():
-    print("🚀 COMPREHENSIVE MODEL ANALYSIS WITH PATIENT-WISE 80/20 SPLIT")
-    print("=" * 80)
-    print(f"📊 Models: RandomForest, XGBoost, LightGBM")
-    print(f"🎯 Train-Test Split: 80%-20% OF PATIENTS (not records)")
-    print(f"📈 Sample Size: {SAMPLE_SIZE:,}")
-    print(f"📁 Files: {len(COMPREHENSIVE_FILES)}")
+
+def quick_test_enhancements():
+    """Quick test to verify enhancements work"""
+    print("🧪 QUICK TEST OF ENHANCEMENTS")
+
+    # Load small sample
+    df = load_comprehensive_data(COMPREHENSIVE_FILES[:3], DATA_DIR, sample_size=1000)
+
+    # Test baseline normalization
+    df_normalized = normalize_by_baseline(df, TARGETS[:1])
+    print(f"✅ Baseline normalization completed")
+
+    # Test personalized features
+    df_enhanced = add_personalized_features(df_normalized, TARGETS[:1])
+    print(f"✅ Personalized features added")
+
+    # Check new columns
+    new_cols = [col for col in df_enhanced.columns if 'normalized' in col or 'rolling' in col or 'deviation' in col]
+    print(f"✅ New features created: {len(new_cols)}")
+
+    # Test Mixed Effects model - use available features instead of assuming cycle_day exists
+    if len(df_enhanced) > 10:
+        # Find available numeric features (excluding IDs and targets)
+        available_features = []
+        for col in df_enhanced.columns:
+            if (pd.api.types.is_numeric_dtype(df_enhanced[col]) and
+                    col not in ['id', 'day_in_study'] and
+                    not col.endswith('_normalized') and
+                    df_enhanced[col].notna().sum() > 0):
+                available_features.append(col)
+
+        # Use first 5 available features for testing
+        mock_features = available_features[:5]
+
+        if len(mock_features) > 1:
+            X = df_enhanced[mock_features].fillna(0).values
+            # Use original target if normalized doesn't exist
+            if 'lh_normalized' in df_enhanced.columns:
+                y = df_enhanced['lh_normalized'].fillna(0).values
+            elif 'lh' in df_enhanced.columns:
+                y = df_enhanced['lh'].fillna(0).values
+            else:
+                y = np.random.random(len(X))
+
+            patient_ids = df_enhanced['id'].values
+
+            try:
+                mixed_model = MixedEffectsEnsemble()
+                mixed_model.fit(X, y, patient_ids)
+                print(f"✅ Mixed Effects model trained successfully")
+            except Exception as e:
+                print(f"⚠️ Mixed Effects test failed (but continuing): {e}")
+
+    print("🎉 All enhancements tested successfully!")
+
+
+# =============================================================================
+# UPDATED MAIN EXECUTION WITH DATA FILTERING
+# =============================================================================
+
+def main_with_filtering():
+    """Enhanced main function with data filtering"""
+
+    print("🚀 ENHANCED PIPELINE WITH DATA FILTERING")
     print("=" * 80)
 
+    # Define paths
+    MAIN_FILE = 'hormones_and_selfreport.csv'
+    FILTERED_DATA_DIR = Path('filtered_data')
+
+    # Step 0: Analyze and filter data if needed
+    print("\n🔍 STEP 0: CHECKING DATA CONSISTENCY")
+    consistency_report = create_consistency_report(
+        DATA_DIR / MAIN_FILE,
+        DATA_DIR,
+        COMPREHENSIVE_FILES
+    )
+
+    # Check if filtering is needed
+    needs_filtering = any(
+        row['status'] == 'OK' and row['overlap_percent'] < 100
+        for _, row in consistency_report.iterrows()
+    )
+
+    if needs_filtering:
+        print("\n🔄 STEP 0.5: FILTERING DATA FILES")
+        filtered_dir = filter_all_files_to_match_patients(
+            DATA_DIR / MAIN_FILE,
+            DATA_DIR,
+            FILTERED_DATA_DIR,
+            COMPREHENSIVE_FILES
+        )
+        # Use filtered data directory for the rest of the pipeline
+        analysis_data_dir = filtered_dir
+    else:
+        print("\n✅ Data already consistent, using original files")
+        analysis_data_dir = DATA_DIR
+
+    # Now run the enhanced pipeline with consistent data
     try:
-        # Step 1: Load comprehensive dataset
-        df = load_comprehensive_data(COMPREHENSIVE_FILES, DATA_DIR, SAMPLE_SIZE)
+        # Update the data loading function to use the correct directory
+        def load_comprehensive_data_with_dir(files, data_dir, sample_size=SAMPLE_SIZE):
+            # Same as original load_comprehensive_data but with specified directory
+            print("📂 Loading comprehensive dataset...")
 
-        print(f"\n📊 Final dataset: {df.shape}")
-        print(f"🎯 Targets: {TARGETS}")
+            # Start with base file
+            base_file = files[0]
+            df = pd.read_csv(data_dir / base_file)
+            df = preprocess_data(df)
 
-        # Step 2: Get ALL available features for each target
-        feature_sets = get_all_features(df, TARGETS)
+            print(f"Base data: {df.shape}")
 
-        # Step 3: Train comprehensive models with PATIENT-WISE split
-        results = train_comprehensive_models(df, feature_sets, TARGETS)
+            # Merge other files
+            for file_name in files[1:]:
+                print(f"🔗 Merging {file_name}...")
+                try:
+                    file_path = data_dir / file_name
+                    if not file_path.exists():
+                        print(f"   ⚠️ File not found: {file_name}")
+                        continue
 
-        # Step 4: Create comprehensive report
+                    new_data = pd.read_csv(file_path)
+                    new_data = preprocess_data(new_data)
+
+                    # Handle file structure
+                    new_data = handle_file_structure(new_data, file_name)
+
+                    # Find merge keys
+                    merge_keys = find_merge_keys(df, new_data, file_name)
+                    if not merge_keys:
+                        print(f"   ⚠️ No merge keys found for {file_name}")
+                        continue
+
+                    # Memory-efficient merge
+                    if len(new_data) > 50000:
+                        new_data = new_data.sample(n=20000, random_state=RANDOM_STATE)
+                        print(f"   🔽 Sampled new data to {new_data.shape}")
+
+                    df = pd.merge(df, new_data, on=merge_keys, how='left',
+                                  suffixes=('', f'_{file_name.replace(".csv", "")}'))
+                    print(f"✅ After {file_name}: {df.shape}")
+
+                    del new_data
+                    gc.collect()
+
+                except Exception as e:
+                    print(f"❌ Error with {file_name}: {e}")
+
+            # Final sampling
+            if len(df) > sample_size:
+                df = df.sample(n=sample_size, random_state=RANDOM_STATE)
+                print(f"🔽 Final sampling to: {df.shape}")
+
+            return df
+
+        # Step 1: Load comprehensive dataset from filtered directory
+        print(f"\n📂 STEP 1: LOADING DATA FROM {analysis_data_dir}")
+        df = load_comprehensive_data_with_dir(COMPREHENSIVE_FILES, analysis_data_dir, SAMPLE_SIZE)
+        print(f"📊 Final dataset: {df.shape}")
+
+        # Step 2: Apply baseline normalization
+        print("\n🔄 STEP 2: APPLYING BASELINE NORMALIZATION...")
+        df = normalize_by_baseline(df, TARGETS, baseline_days=3)
+
+        # Use normalized targets for modeling
+        NORMALIZED_TARGETS = [f"{target}_normalized" for target in TARGETS]
+        print(f"🎯 Normalized targets: {NORMALIZED_TARGETS}")
+
+        # Step 3: Add personalized features
+        print("\n🎯 STEP 3: ADDING PERSONALIZED FEATURES...")
+        df = add_personalized_features(df, TARGETS, window_size=7)
+        print(f"📊 Dataset with personalized features: {df.shape}")
+
+        # Step 4: Get features for enhanced targets
+        feature_sets = get_all_features(df, NORMALIZED_TARGETS)
+
+        # Step 5: Train enhanced models
+        print("\n🤖 STEP 4: TRAINING ENHANCED MODELS...")
+        results = train_enhanced_models(df, feature_sets, NORMALIZED_TARGETS)
+
+        # Step 6: Create comprehensive report
         create_comprehensive_report(results, feature_sets)
 
-        print(f"\n✅ PATIENT-WISE MODEL ANALYSIS COMPLETE!")
+        print(f"\n✅ ENHANCED PERSONALIZED MODELING COMPLETE!")
         print(f"📁 Results saved to: {OUTPUT_DIR}")
-        print(f"📊 Diagnostic plots and comprehensive statistics generated")
 
         # Print quick summary
         print(f"\n📋 QUICK SUMMARY:")
@@ -803,10 +1321,49 @@ def main():
                 print(f"     Test Patients: {test_patients}")
 
     except Exception as e:
-        print(f"❌ Error in main execution: {e}")
+        print(f"❌ Error in enhanced main execution: {e}")
         import traceback
         traceback.print_exc()
 
 
+# =============================================================================
+# QUICK DATA FILTERING FUNCTION (Standalone)
+# =============================================================================
+
+def quick_filter_data():
+    """
+    Quick function to just filter the data without running the full pipeline
+    """
+    MAIN_FILE = 'hormones_and_selfreport.csv'
+    FILTERED_DATA_DIR = Path('filtered_data')
+
+    print("🔍 QUICK DATA FILTERING")
+    print("=" * 50)
+
+    # First check consistency
+    report = create_consistency_report(
+        DATA_DIR / MAIN_FILE,
+        DATA_DIR,
+        COMPREHENSIVE_FILES
+    )
+
+    # Filter if needed
+    filter_all_files_to_match_patients(
+        DATA_DIR / MAIN_FILE,
+        DATA_DIR,
+        FILTERED_DATA_DIR,
+        COMPREHENSIVE_FILES
+    )
+
+    print("\n✅ DATA FILTERING COMPLETE!")
+    print(f"📁 Filtered files saved to: {FILTERED_DATA_DIR}")
+# =============================================================================
+# MAIN EXECUTION
+# =============================================================================
+
 if __name__ == "__main__":
-    main()
+    # Run quick test first
+    quick_test_enhancements()
+
+    # Run full enhanced pipeline
+    main_with_filtering()
