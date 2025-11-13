@@ -1,3 +1,0 @@
-target,type,train_score,test_score,metric
-phase,classification,0.6801537070524413,0.5085020242914979,accuracy
-menstruation_start,regression,0.9544612030340023,0.8720799065143445,r2
