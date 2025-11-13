@@ -225,7 +225,6 @@ def create_consistency_report(main_file_path, data_dir, file_list):
 
     return report_df
 
-
 # =============================================================================
 # ENHANCEMENT 1: BASELINE NORMALIZATION
 # =============================================================================
@@ -402,15 +401,6 @@ class SimpleMixedEffects(BaseEstimator, RegressorMixin):
                         pass
 
         return y_pred
-
-    def get_patient_models_info(self):
-        """Get information about patient-specific models"""
-        return {
-            'n_patient_models': len(self.patient_models),
-            'coverage_rate': len(self.patient_models) / len(set(self.patient_models.keys())) * 100
-        }
-
-
 # =============================================================================
 # EFFICIENT DATA LOADING
 # =============================================================================
@@ -603,21 +593,14 @@ def patient_wise_train_test_split(df, test_size=0.2, random_state=42):
 
 
 # =============================================================================
-# COMPREHENSIVE FEATURE PROCESSING (EXCLUDING HORMONE-DERIVED FEATURES)
+# COMPREHENSIVE FEATURE PROCESSING (ALL FEATURES)
 # =============================================================================
 
 def get_all_features(df, targets):
-    """Get all available features after cleaning, excluding hormone-derived features"""
-    print(f"\n🎯 Processing all available features (excluding hormone-derived features)...")
+    """Get all available features after cleaning"""
+    print(f"\n🎯 Processing all available features...")
 
     feature_sets = {}
-
-    # Define hormone-related columns to exclude
-    hormone_base_cols = ['lh', 'estrogen', 'pdg']
-    hormone_derived_patterns = [
-        '_normalized', '_rolling_mean', '_rolling_std', '_personal_mean',
-        '_deviation', '_daily_change', '_cumulative'
-    ]
 
     for target in targets:
         if target not in df.columns:
@@ -625,29 +608,11 @@ def get_all_features(df, targets):
 
         print(f"\nProcessing features for {target}...")
 
-        # Remove targets, metadata, AND hormone-derived features
-        exclude_cols = targets + ['id', 'day_in_study', 'study_interval', 'is_weekend']
-
-        # Add hormone-derived features to exclude list
-        for hormone in hormone_base_cols:
-            for pattern in hormone_derived_patterns:
-                derived_col = f"{hormone}{pattern}"
-                if derived_col in df.columns:
-                    exclude_cols.append(derived_col)
-
-        # Also exclude the base hormone columns if they're not the target
-        for hormone in hormone_base_cols:
-            if hormone != target.replace('_normalized', '') and hormone in df.columns:
-                exclude_cols.append(hormone)
-
-        # Remove duplicates
-        exclude_cols = list(set(exclude_cols))
-
+        # Remove targets and metadata
+        exclude_cols = targets + TARGETS + ['id', 'day_in_study', 'study_interval', 'is_weekend']
         all_features = [col for col in df.columns if col not in exclude_cols]
 
         print(f"   Initial features: {len(all_features)}")
-        print(
-            f"   Excluded hormone-derived features: {len([col for col in df.columns if col in exclude_cols and any(h in col for h in hormone_base_cols)])}")
 
         # Get numeric columns only
         numeric_features = []
@@ -896,7 +861,7 @@ def train_enhanced_models(df, feature_sets, targets):
         target_data = df.dropna(subset=[target]).copy()
 
         print(f"📊 Dataset before split: {target_data.shape}")
-        print(f"🎯 Using {len(all_features)} features")
+        print(f"🎯 Using {len(all_features)} features initially")
 
         # PATIENT-WISE 80/20 Split
         train_data, test_data, train_patients, test_patients = patient_wise_train_test_split(
@@ -927,6 +892,21 @@ def train_enhanced_models(df, feature_sets, targets):
         X_train_scaled = scaler.fit_transform(X_train_imputed)
         X_test_scaled = scaler.transform(X_test_imputed)
 
+        # Feature selection: Use RandomForest to select top 15 features
+        print("\n🔝 Selecting top 15 features...")
+        selector_model = RandomForestRegressor(n_estimators=50, random_state=RANDOM_STATE, n_jobs=-1)
+        selector_model.fit(X_train_scaled, y_train)
+        importances = selector_model.feature_importances_
+        num_top = min(15, len(all_features))
+        top_indices = np.argsort(importances)[-num_top:]
+        top_features = [all_features[i] for i in top_indices]
+        print(f"Top {num_top} features for {target}: {top_features}")
+
+        # Subset to top features
+        X_train_selected = X_train_scaled[:, top_indices]
+        X_test_selected = X_test_scaled[:, top_indices]
+        n_selected_features = len(top_features)
+
         target_results = {}
 
         for model_name, model in models.items():
@@ -936,7 +916,7 @@ def train_enhanced_models(df, feature_sets, targets):
             try:
                 # Special handling for Mixed Effects model
                 if model_name == 'MixedEffects':
-                    model.fit(X_train_scaled, y_train, train_patient_ids)
+                    model.fit(X_train_selected, y_train, train_patient_ids)
                     training_time = time.time() - start_time
 
                     # Get model info
@@ -944,35 +924,35 @@ def train_enhanced_models(df, feature_sets, targets):
                     print(f"   Patient model coverage: {model_info['coverage_rate']:.1f}%")
 
                     # Predictions (need to pass patient IDs)
-                    y_pred_train = model.predict(X_train_scaled, train_patient_ids)
-                    y_pred_test = model.predict(X_test_scaled, test_patient_ids)
+                    y_pred_train = model.predict(X_train_selected, train_patient_ids)
+                    y_pred_test = model.predict(X_test_selected, test_patient_ids)
                 else:
                     # Standard models
-                    model.fit(X_train_scaled, y_train)
+                    model.fit(X_train_selected, y_train)
                     training_time = time.time() - start_time
 
                     # Predictions
-                    y_pred_train = model.predict(X_train_scaled)
-                    y_pred_test = model.predict(X_test_scaled)
+                    y_pred_train = model.predict(X_train_selected)
+                    y_pred_test = model.predict(X_test_selected)
 
                 # Calculate comprehensive metrics
                 train_metrics = calculate_comprehensive_metrics(y_train, y_pred_train,
                                                                 f"{model_name} (Train)", target,
-                                                                len(all_features), len(train_patients))
+                                                                n_selected_features, len(train_patients))
                 test_metrics = calculate_comprehensive_metrics(y_test, y_pred_test,
                                                                f"{model_name} (Test)", target,
-                                                               len(all_features), len(test_patients))
+                                                               n_selected_features, len(test_patients))
 
                 # Create diagnostic plots
                 create_regression_diagnostics(y_test, y_pred_test, model_name, target,
-                                              len(all_features), len(test_patients))
+                                              n_selected_features, len(test_patients))
 
                 # Store results
                 target_results[model_name] = {
                     'training_time': training_time,
                     'train_metrics': train_metrics,
                     'test_metrics': test_metrics,
-                    'features_used': all_features,
+                    'features_used': top_features,
                     'train_patients': train_patients,
                     'test_patients': test_patients,
                     'model': model
@@ -1016,13 +996,16 @@ def create_comprehensive_report(results, feature_sets):
             f.write(f"\nTARGET: {target.upper()}\n")
             f.write("-" * 50 + "\n")
 
-            if target in feature_sets:
-                f.write(f"ALL Features Used: {len(feature_sets[target])}\n")
-                categories = categorize_features(feature_sets[target])
-                f.write("Feature Categories:\n")
-                for category, count in categories.items():
-                    f.write(f"  {category}: {count}\n")
-                f.write("\n")
+            # Use top features from results (since we selected top 15 per target)
+            top_features = next(iter(target_results.values()))['features_used'] if target_results else []
+            f.write(f"Top {len(top_features)} Features Used:\n")
+            for feature in top_features:
+                f.write(f"  - {feature}\n")
+            categories = categorize_features(top_features)
+            f.write("Feature Categories:\n")
+            for category, count in categories.items():
+                f.write(f"  {category}: {count}\n")
+            f.write("\n")
 
             f.write("MODEL PERFORMANCE COMPARISON (TEST SET - UNSEEN PATIENTS):\n")
             f.write("-" * 60 + "\n")
@@ -1089,11 +1072,12 @@ def save_results_csv(results, feature_sets):
 
     # Save feature information
     feature_data = []
-    for target, features in feature_sets.items():
-        categories = categorize_features(features)
+    for target, target_results in results.items():
+        top_features = next(iter(target_results.values()))['features_used'] if target_results else []
+        categories = categorize_features(top_features)
         feature_data.append({
             'target': target,
-            'total_features': len(features),
+            'total_features': len(top_features),
             **categories
         })
 
@@ -1174,17 +1158,12 @@ def quick_test_enhancements():
 
     # Test Mixed Effects model - use available features instead of assuming cycle_day exists
     if len(df_enhanced) > 10:
-        # Find available numeric features (excluding IDs, targets, and hormone-derived features)
+        # Find available numeric features (excluding IDs and targets)
         available_features = []
-        hormone_cols = ['lh', 'estrogen', 'pdg']
-        hormone_patterns = ['_normalized', '_rolling_mean', '_rolling_std', '_personal_mean', '_deviation',
-                            '_daily_change', '_cumulative']
-
         for col in df_enhanced.columns:
             if (pd.api.types.is_numeric_dtype(df_enhanced[col]) and
                     col not in ['id', 'day_in_study'] and
-                    not any(hormone in col for hormone in hormone_cols) and
-                    not any(pattern in col for pattern in hormone_patterns) and
+                    not col.endswith('_normalized') and
                     df_enhanced[col].notna().sum() > 0):
                 available_features.append(col)
 
@@ -1204,7 +1183,7 @@ def quick_test_enhancements():
             patient_ids = df_enhanced['id'].values
 
             try:
-                mixed_model = SimpleMixedEffects()
+                mixed_model = MixedEffectsEnsemble()
                 mixed_model.fit(X, y, patient_ids)
                 print(f"✅ Mixed Effects model trained successfully")
             except Exception as e:
@@ -1330,7 +1309,7 @@ def main_with_filtering():
         df = add_personalized_features(df, TARGETS, window_size=7)
         print(f"📊 Dataset with personalized features: {df.shape}")
 
-        # Step 4: Get features for enhanced targets (EXCLUDING HORMONE-DERIVED FEATURES)
+        # Step 4: Get features for enhanced targets
         feature_sets = get_all_features(df, NORMALIZED_TARGETS)
 
         # Step 5: Train enhanced models
@@ -1347,8 +1326,8 @@ def main_with_filtering():
         print(f"\n📋 QUICK SUMMARY:")
         for target, target_results in results.items():
             print(f"\n   {target.upper()}:")
-            if target in feature_sets:
-                print(f"     Features used: {len(feature_sets[target])}")
+            top_features = next(iter(target_results.values()))['features_used'] if target_results else []
+            print(f"     Top features used: {len(top_features)}")
             best_model = None
             best_r2 = -1
             for model_name, result in target_results.items():
@@ -1397,8 +1376,6 @@ def quick_filter_data():
 
     print("\n✅ DATA FILTERING COMPLETE!")
     print(f"📁 Filtered files saved to: {FILTERED_DATA_DIR}")
-
-
 # =============================================================================
 # MAIN EXECUTION
 # =============================================================================

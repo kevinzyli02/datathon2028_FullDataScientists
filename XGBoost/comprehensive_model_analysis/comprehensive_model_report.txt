@@ -9,204 +9,204 @@ Random State: 42
 
 TARGET: LH
 --------------------------------------------------
-ALL Features Used: 72
+ALL Features Used: 70
 Feature Categories:
-  Sleep-related: 19
+  Sleep-related: 18
   Stress-related: 2
   Heart-related: 3
   Temperature-related: 15
   Respiratory-related: 5
   Exercise-related: 3
   Glucose-related: 4
-  Other: 21
+  Other: 20
 
 MODEL PERFORMANCE COMPARISON (TEST SET):
 ----------------------------------------
        Model  Features     R2  Pearson_r  Spearman_r    MAE   RMSE  Time_s
-RandomForest        72 0.7825     0.8846      0.9152 0.0643 1.1213  0.3005
-     XGBoost        72 0.7840     0.8855      0.9885 0.0605 1.1175  0.2344
-    LightGBM        72 0.7766     0.8814      0.9748 0.0904 1.1363  0.0695
+RandomForest        70 0.3677     0.6084      0.9594 0.1358 3.3149  0.3391
+     XGBoost        70 0.4007     0.6364      0.9729 0.1365 3.2271  0.2029
+    LightGBM        70 0.3658     0.6078      0.8099 0.1702 3.3198  0.0762
 
 DETAILED METRICS BY MODEL:
 ------------------------------
 
 RandomForest:
   Error Metrics:
-    MAE:  0.0643
-    MSE:  1.2573
-    RMSE: 1.1213
-    MAPE: 0.91%
+    MAE:  0.1358
+    MSE:  10.9888
+    RMSE: 3.3149
+    MAPE: 1.94%
   Correlation Metrics:
-    R2:        0.7825
-    Pearson:   0.8846
-    Spearman:  0.9152
+    R2:        0.3677
+    Pearson:   0.6084
+    Spearman:  0.9594
   Data Statistics:
-    True Mean: 4.8013
-    True Std:  2.4041
-  Training Time: 0.30s
+    True Mean: 5.1557
+    True Std:  4.1688
+  Training Time: 0.34s
 
 XGBoost:
   Error Metrics:
-    MAE:  0.0605
-    MSE:  1.2487
-    RMSE: 1.1175
-    MAPE: 0.72%
+    MAE:  0.1365
+    MSE:  10.4144
+    RMSE: 3.2271
+    MAPE: 1.78%
   Correlation Metrics:
-    R2:        0.7840
-    Pearson:   0.8855
-    Spearman:  0.9885
+    R2:        0.4007
+    Pearson:   0.6364
+    Spearman:  0.9729
   Data Statistics:
-    True Mean: 4.8013
-    True Std:  2.4041
-  Training Time: 0.23s
+    True Mean: 5.1557
+    True Std:  4.1688
+  Training Time: 0.20s
 
 LightGBM:
   Error Metrics:
-    MAE:  0.0904
-    MSE:  1.2911
-    RMSE: 1.1363
-    MAPE: 1.45%
+    MAE:  0.1702
+    MSE:  11.0212
+    RMSE: 3.3198
+    MAPE: 2.62%
   Correlation Metrics:
-    R2:        0.7766
-    Pearson:   0.8814
-    Spearman:  0.9748
+    R2:        0.3658
+    Pearson:   0.6078
+    Spearman:  0.8099
   Data Statistics:
-    True Mean: 4.8013
-    True Std:  2.4041
-  Training Time: 0.07s
+    True Mean: 5.1557
+    True Std:  4.1688
+  Training Time: 0.08s
 
 TARGET: ESTROGEN
 --------------------------------------------------
-ALL Features Used: 72
+ALL Features Used: 70
 Feature Categories:
-  Sleep-related: 19
+  Sleep-related: 18
   Stress-related: 2
   Heart-related: 3
   Temperature-related: 15
   Respiratory-related: 5
   Exercise-related: 3
   Glucose-related: 4
-  Other: 21
+  Other: 20
 
 MODEL PERFORMANCE COMPARISON (TEST SET):
 ----------------------------------------
-       Model  Features     R2  Pearson_r  Spearman_r    MAE   RMSE  Time_s
-RandomForest        72 0.9526     0.9762      0.9936 0.6112 6.9831  0.2360
-     XGBoost        72 0.9375     0.9689      0.9962 0.5373 8.0153  0.0626
-    LightGBM        72 0.9587     0.9792      0.9411 0.7485 6.5143  0.0541
+       Model  Features     R2  Pearson_r  Spearman_r    MAE    RMSE  Time_s
+RandomForest        70 0.9370     0.9680      0.9855 0.7270 10.0608  0.2076
+     XGBoost        70 0.9115     0.9549      0.9820 0.7665 11.9185  0.0672
+    LightGBM        70 0.9217     0.9601      0.8157 1.0326 11.2132  0.0658
 
 DETAILED METRICS BY MODEL:
 ------------------------------
 
 RandomForest:
   Error Metrics:
-    MAE:  0.6112
-    MSE:  48.7637
-    RMSE: 6.9831
-    MAPE: 0.53%
+    MAE:  0.7270
+    MSE:  101.2191
+    RMSE: 10.0608
+    MAPE: 8.55%
   Correlation Metrics:
-    R2:        0.9526
-    Pearson:   0.9762
-    Spearman:  0.9936
+    R2:        0.9370
+    Pearson:   0.9680
+    Spearman:  0.9855
   Data Statistics:
-    True Mean: 56.5047
-    True Std:  32.0677
-  Training Time: 0.24s
+    True Mean: 59.4595
+    True Std:  40.0691
+  Training Time: 0.21s
 
 XGBoost:
   Error Metrics:
-    MAE:  0.5373
-    MSE:  64.2451
-    RMSE: 8.0153
-    MAPE: 0.51%
+    MAE:  0.7665
+    MSE:  142.0510
+    RMSE: 11.9185
+    MAPE: 14.77%
   Correlation Metrics:
-    R2:        0.9375
-    Pearson:   0.9689
-    Spearman:  0.9962
+    R2:        0.9115
+    Pearson:   0.9549
+    Spearman:  0.9820
   Data Statistics:
-    True Mean: 56.5047
-    True Std:  32.0677
-  Training Time: 0.06s
+    True Mean: 59.4595
+    True Std:  40.0691
+  Training Time: 0.07s
 
 LightGBM:
   Error Metrics:
-    MAE:  0.7485
-    MSE:  42.4364
-    RMSE: 6.5143
-    MAPE: 0.84%
+    MAE:  1.0326
+    MSE:  125.7352
+    RMSE: 11.2132
+    MAPE: 9.38%
   Correlation Metrics:
-    R2:        0.9587
-    Pearson:   0.9792
-    Spearman:  0.9411
+    R2:        0.9217
+    Pearson:   0.9601
+    Spearman:  0.8157
   Data Statistics:
-    True Mean: 56.5047
-    True Std:  32.0677
-  Training Time: 0.05s
+    True Mean: 59.4595
+    True Std:  40.0691
+  Training Time: 0.07s
 
 TARGET: PDG
 --------------------------------------------------
-ALL Features Used: 72
+ALL Features Used: 70
 Feature Categories:
-  Sleep-related: 19
+  Sleep-related: 18
   Stress-related: 2
   Heart-related: 3
   Temperature-related: 15
   Respiratory-related: 5
   Exercise-related: 3
   Glucose-related: 4
-  Other: 21
+  Other: 20
 
 MODEL PERFORMANCE COMPARISON (TEST SET):
 ----------------------------------------
        Model  Features     R2  Pearson_r  Spearman_r    MAE   RMSE  Time_s
-RandomForest        72 0.8718     0.9338      0.9148 0.0680 0.7587  0.2643
-     XGBoost        72 0.8675     0.9326      0.9272 0.0555 0.7710  0.0618
-    LightGBM        72 0.8775     0.9371      0.9711 0.0725 0.7415  0.0544
+RandomForest        70 0.9280     0.9653      0.9741 0.0433 0.4807  0.2667
+     XGBoost        70 0.9413     0.9717      0.9760 0.0359 0.4343  0.0704
+    LightGBM        70 0.9080     0.9535      0.8561 0.0628 0.5436  0.1896
 
 DETAILED METRICS BY MODEL:
 ------------------------------
 
 RandomForest:
   Error Metrics:
-    MAE:  0.0680
-    MSE:  0.5756
-    RMSE: 0.7587
-    MAPE: 2.67%
+    MAE:  0.0433
+    MSE:  0.2310
+    RMSE: 0.4807
+    MAPE: 2.06%
   Correlation Metrics:
-    R2:        0.8718
-    Pearson:   0.9338
-    Spearman:  0.9148
+    R2:        0.9280
+    Pearson:   0.9653
+    Spearman:  0.9741
   Data Statistics:
-    True Mean: 1.8733
-    True Std:  2.1185
-  Training Time: 0.26s
+    True Mean: 1.8935
+    True Std:  1.7918
+  Training Time: 0.27s
 
 XGBoost:
   Error Metrics:
-    MAE:  0.0555
-    MSE:  0.5945
-    RMSE: 0.7710
-    MAPE: 1.81%
+    MAE:  0.0359
+    MSE:  0.1886
+    RMSE: 0.4343
+    MAPE: 1.74%
   Correlation Metrics:
-    R2:        0.8675
-    Pearson:   0.9326
-    Spearman:  0.9272
+    R2:        0.9413
+    Pearson:   0.9717
+    Spearman:  0.9760
   Data Statistics:
-    True Mean: 1.8733
-    True Std:  2.1185
-  Training Time: 0.06s
+    True Mean: 1.8935
+    True Std:  1.7918
+  Training Time: 0.07s
 
 LightGBM:
   Error Metrics:
-    MAE:  0.0725
-    MSE:  0.5498
-    RMSE: 0.7415
-    MAPE: 2.93%
+    MAE:  0.0628
+    MSE:  0.2955
+    RMSE: 0.5436
+    MAPE: 2.78%
   Correlation Metrics:
-    R2:        0.8775
-    Pearson:   0.9371
-    Spearman:  0.9711
+    R2:        0.9080
+    Pearson:   0.9535
+    Spearman:  0.8561
   Data Statistics:
-    True Mean: 1.8733
-    True Std:  2.1185
-  Training Time: 0.05s
+    True Mean: 1.8935
+    True Std:  1.7918
+  Training Time: 0.19s
