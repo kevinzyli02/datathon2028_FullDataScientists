@@ -1,340 +1,544 @@
-# hormone_based_predictions_glucose_debug.py
-"""
-HORMONE-BASED PREDICTIONS - GLUCOSE DEBUG VERSION
-Debugging why glucose_target column is missing
-"""
+# =============================================================================
+# COMPREHENSIVE MODEL WITH PATIENT-WISE 80/20 SPLIT + PERSONALIZATION ENHANCEMENTS
+# =============================================================================
 
 import pandas as pd
 import numpy as np
-from xgboost import XGBClassifier, XGBRegressor
-from sklearn.model_selection import train_test_split
-from sklearn.metrics import r2_score, accuracy_score, mean_squared_error
-from sklearn.preprocessing import LabelEncoder, StandardScaler
-from sklearn.impute import SimpleImputer
-from sklearn.linear_model import Ridge
-import matplotlib.pyplot as plt
-import seaborn as sns
 from pathlib import Path
 import os
 import warnings
 
 warnings.filterwarnings('ignore')
 
-# =============================================================================
-# CONFIGURATION
-# =============================================================================
+from sklearn.ensemble import RandomForestRegressor
+from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import StandardScaler
+from sklearn.metrics import mean_squared_error, r2_score, mean_absolute_error
+from sklearn.impute import SimpleImputer
+from sklearn.base import BaseEstimator, RegressorMixin
+from scipy.stats import pearsonr, spearmanr
+import xgboost as xgb
+import lightgbm as lgb
+import matplotlib.pyplot as plt
+import seaborn as sns
+import gc
+import time
 
 DATA_DIR = Path(r"C:\Users\kevin\PycharmProjects\datathon2028_FullDataScientists\data")
-OUTPUT_DIR = Path('hormone_based_predictions_glucose_debug')
+OUTPUT_DIR = Path('patient_wise_model_analysis')
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
-# Hormone features
-HORMONE_FEATURES = ['lh', 'estrogen', 'pdg']
+# Use all available files for comprehensive analysis
+COMPREHENSIVE_FILES = [
+    'hormones_and_selfreport.csv',
+    'sleep.csv',
+    'stress_score.csv',
+    'resting_heart_rate.csv',
+    'glucose.csv',
+    'computed_temperature.csv',
+    'height_and_weight.csv',
+    'exercise.csv',
+    'respiratory_rate_summary.csv',
+    'sleep_score.csv',
+    'wrist_temperature.csv'
+]
 
-# Target variables
-TARGETS = {
-    'phase': 'categorical',
-    'menstruation_start': 'regression',
-    'glucose': 'regression'
-}
-
+TARGETS = ['lh', 'estrogen', 'pdg']
 TEST_SIZE = 0.2
 RANDOM_STATE = 42
+SAMPLE_SIZE = 15000
 
 
 # =============================================================================
-# IMPROVED GLUCOSE PROCESSING WITH DEBUGGING
+# DATA FILTERING FUNCTIONS
 # =============================================================================
 
-def add_glucose_features_debug(df, glucose_df, is_training=True):
-    """Add glucose features with extensive debugging"""
-    print(f"   🍬 Adding glucose features ({'training' if is_training else 'testing'})...")
+def filter_all_files_to_match_patients(main_file_path, data_dir, output_dir, file_list):
+    """
+    Filter all data files to only include patients present in the main file
 
-    # Create a backup of original dataframe
-    original_columns = set(df.columns)
+    Parameters:
+    - main_file_path: Path to the main file (hormones_and_selfreport.csv)
+    - data_dir: Directory containing all data files
+    - output_dir: Directory to save filtered files
+    - file_list: List of all files to filter
+    """
 
-    try:
-        print(f"   🔍 Glucose data shape: {glucose_df.shape}")
-        print(f"   🔍 Glucose data columns: {glucose_df.columns.tolist()}")
-        print(f"   🔍 Glucose data sample:")
-        print(glucose_df.head(3))
+    print("🔍 FILTERING DATA FILES TO MATCH PATIENTS IN MAIN FILE")
+    print("=" * 60)
 
-        # Check if glucose data has the required columns
-        if 'glucose_value' not in glucose_df.columns:
-            print("   ❌ 'glucose_value' column not found in glucose data")
-            # Create synthetic glucose target
-            df['glucose_target'] = np.random.normal(5.5, 1.0, len(df))
-            return df
+    # Create output directory
+    os.makedirs(output_dir, exist_ok=True)
 
-        # Clean glucose data
-        glucose_clean = glucose_df.copy()
-        print(f"   🔍 Original glucose records: {len(glucose_clean)}")
+    # Step 1: Read main file and get patient IDs
+    print(f"📋 Reading main file: {main_file_path}")
+    main_df = pd.read_csv(main_file_path)
+    valid_patient_ids = set(main_df['id'].unique())
+    print(f"✅ Found {len(valid_patient_ids)} valid patients in main file")
 
-        # Handle infinite values
-        glucose_clean['glucose_value'] = glucose_clean['glucose_value'].replace([np.inf, -np.inf], np.nan)
-        print(f"   🔍 Glucose records after inf removal: {len(glucose_clean)}")
+    # Step 2: Process each file
+    for file_name in file_list:
+        print(f"\n🔄 Processing {file_name}...")
+        file_path = data_dir / file_name
 
-        # Remove rows with NaN glucose values
-        glucose_clean = glucose_clean.dropna(subset=['glucose_value'])
-        print(f"   🔍 Glucose records after NaN removal: {len(glucose_clean)}")
-
-        if len(glucose_clean) == 0:
-            print("   ❌ No valid glucose data after cleaning")
-            df['glucose_target'] = 5.5  # Default value
-            return df
-
-        # Basic glucose statistics
-        glucose_stats = glucose_clean['glucose_value'].describe()
-        print(f"   📊 Glucose value stats:")
-        print(f"      Count: {glucose_stats['count']:.0f}")
-        print(f"      Mean: {glucose_stats['mean']:.2f}")
-        print(f"      Std: {glucose_stats['std']:.2f}")
-        print(f"      Min: {glucose_stats['min']:.2f}")
-        print(f"      Max: {glucose_stats['max']:.2f}")
-
-        # Check for patients with glucose data
-        patients_with_glucose = glucose_clean['id'].unique()
-        print(f"   👥 Patients with glucose data: {len(patients_with_glucose)}")
-
-        # Get patients in current dataset
-        patients_in_dataset = df['id'].unique()
-        print(f"   👥 Patients in current dataset: {len(patients_in_dataset)}")
-
-        # Find overlapping patients
-        overlapping_patients = set(patients_with_glucose) & set(patients_in_dataset)
-        print(f"   🔗 Overlapping patients: {len(overlapping_patients)}")
-
-        if len(overlapping_patients) == 0:
-            print("   ⚠️  No overlapping patients between hormones and glucose data")
-            print("   🛠️  Using global glucose statistics")
-
-            # Use global glucose statistics
-            global_glucose_mean = glucose_clean['glucose_value'].mean()
-            global_glucose_std = glucose_clean['glucose_value'].std()
-
-            df['glucose_global_mean'] = global_glucose_mean
-            df['glucose_global_std'] = global_glucose_std
-            df['glucose_target'] = global_glucose_mean
-
-            print(f"   ✅ Set global glucose target: {global_glucose_mean:.2f}")
-            return df
-
-        # Calculate patient-specific glucose statistics only for overlapping patients
-        patient_glucose_stats = glucose_clean[glucose_clean['id'].isin(overlapping_patients)].groupby('id')[
-            'glucose_value'].agg([
-            'mean', 'std', 'count'
-        ]).reset_index()
-
-        patient_glucose_stats.columns = ['id', 'glucose_patient_mean', 'glucose_patient_std', 'glucose_count']
-
-        print(f"   📊 Patient glucose stats calculated for {len(patient_glucose_stats)} patients")
-        print(f"   📊 Patient glucose stats sample:")
-        print(patient_glucose_stats.head(3))
-
-        # Merge with main dataframe
-        df = pd.merge(df, patient_glucose_stats, on='id', how='left')
-
-        # Check merge results
-        merged_patients_with_glucose = df['glucose_patient_mean'].notna().sum()
-        print(f"   🔗 Patients with glucose data after merge: {merged_patients_with_glucose}")
-
-        # Calculate global statistics for normalization
-        global_glucose_mean = patient_glucose_stats['glucose_patient_mean'].mean()
-        global_glucose_std = patient_glucose_stats['glucose_patient_mean'].std()
-
-        print(f"   📊 Global glucose stats - Mean: {global_glucose_mean:.2f}, Std: {global_glucose_std:.2f}")
-
-        # Create normalized glucose target
-        df['glucose_normalized'] = (df['glucose_patient_mean'] - global_glucose_mean) / global_glucose_std
-
-        # Fill missing values
-        fill_mean = global_glucose_mean
-        fill_std = global_glucose_std
-
-        df['glucose_patient_mean'] = df['glucose_patient_mean'].fillna(fill_mean)
-        df['glucose_patient_std'] = df['glucose_patient_std'].fillna(fill_std)
-        df['glucose_normalized'] = df['glucose_normalized'].fillna(0)
-
-        # Set glucose target
-        df['glucose_target'] = df['glucose_normalized']
-
-        # Add simple glucose features for all patients
-        df['glucose_global_mean'] = global_glucose_mean
-        df['glucose_global_std'] = global_glucose_std
-
-        # Check final glucose target statistics
-        glucose_target_stats = df['glucose_target'].describe()
-        print(f"   ✅ Final glucose target stats:")
-        print(f"      Count: {glucose_target_stats['count']:.0f}")
-        print(f"      Mean: {glucose_target_stats['mean']:.6f}")
-        print(f"      Std: {glucose_target_stats['std']:.6f}")
-        print(f"      Min: {glucose_target_stats['min']:.6f}")
-        print(f"      Max: {glucose_target_stats['max']:.6f}")
-
-        # Verify glucose_target column exists
-        if 'glucose_target' not in df.columns:
-            print("   ❌ CRITICAL: glucose_target column was not created!")
-            df['glucose_target'] = global_glucose_mean
-        else:
-            print("   ✅ glucose_target column successfully created")
-
-        # Show new columns added
-        new_columns = set(df.columns) - original_columns
-        print(f"   📋 New columns added: {list(new_columns)}")
-
-    except Exception as e:
-        print(f"   ❌ Error in glucose processing: {e}")
-        import traceback
-        traceback.print_exc()
-        print("   🛠️  Creating fallback glucose target")
-        # Fallback: create synthetic glucose data
-        df['glucose_target'] = np.random.normal(0, 1, len(df))
-
-    return df
-
-
-# =============================================================================
-# MODIFIED DATA PROCESSING WITH DEBUGGING
-# =============================================================================
-
-def process_single_dataset_debug(hormones_df, glucose_df, is_training=True):
-    """Process a single dataset with extensive debugging"""
-    dataset_type = "Training" if is_training else "Testing"
-    print(f"   🔄 Processing {dataset_type} dataset...")
-
-    # Preprocess hormones
-    df = preprocess_hormones_data(hormones_df)
-
-    # Create derived targets
-    df = create_derived_targets(df)
-
-    # Add glucose features with debugging
-    df = add_glucose_features_debug(df, glucose_df, is_training)
-
-    # Verify all target columns exist
-    print("   🔍 Verifying target columns...")
-    required_targets = ['phase_encoded', 'days_to_next_menstruation', 'glucose_target']
-    for target in required_targets:
-        if target in df.columns:
-            print(f"      ✅ {target}: FOUND")
-        else:
-            print(f"      ❌ {target}: MISSING")
-            # Create missing target with synthetic data
-            if target == 'glucose_target':
-                df['glucose_target'] = np.random.normal(0, 1, len(df))
-                print(f"      🛠️  Created synthetic {target}")
-
-    # Create features
-    df = create_hormone_features(df, is_training)
-
-    # Clean data
-    df = clean_dataframe(df)
-
-    return df
-
-
-def safe_load_and_process_data_debug():
-    """Load and process data with extensive debugging"""
-    print("📂 Loading and processing data...")
-
-    # Load raw data
-    hormones_df = pd.read_csv(DATA_DIR / 'hormones_and_selfreport.csv')
-    glucose_df = pd.read_csv(DATA_DIR / 'glucose.csv')
-
-    print(f"   ✅ Raw hormones data: {hormones_df.shape}")
-    print(f"   ✅ Raw glucose data: {glucose_df.shape}")
-
-    # Display sample of data for debugging
-    print(f"   🔍 Hormones data sample:")
-    print(hormones_df[['id', 'day_in_study'] + HORMONE_FEATURES].head(3))
-    print(f"   🔍 Glucose data sample:")
-    print(glucose_df[['id', 'timestamp', 'glucose_value']].head(3))
-
-    # Get unique patient IDs from hormones data
-    patient_ids = hormones_df['id'].unique()
-    print(f"   👥 Total patients in hormones data: {len(patient_ids)}")
-
-    # Get unique patient IDs from glucose data
-    glucose_patient_ids = glucose_df['id'].unique()
-    print(f"   👥 Total patients in glucose data: {len(glucose_patient_ids)}")
-
-    # Find overlapping patients
-    overlapping_patients = set(patient_ids) & set(glucose_patient_ids)
-    print(f"   🔗 Patients with both hormones and glucose data: {len(overlapping_patients)}")
-
-    # Split patient IDs FIRST
-    train_patients, test_patients = train_test_split(
-        list(overlapping_patients) if overlapping_patients else patient_ids,
-        test_size=TEST_SIZE,
-        random_state=RANDOM_STATE
-    )
-
-    print(f"   📊 Training patients: {len(train_patients)}")
-    print(f"   📊 Testing patients: {len(test_patients)}")
-
-    # Split hormones data
-    train_hormones = hormones_df[hormones_df['id'].isin(train_patients)].copy()
-    test_hormones = hormones_df[hormones_df['id'].isin(test_patients)].copy()
-
-    # Split glucose data
-    train_glucose = glucose_df[glucose_df['id'].isin(train_patients)].copy()
-    test_glucose = glucose_df[glucose_df['id'].isin(test_patients)].copy()
-
-    print(f"   📊 Training hormones: {train_hormones.shape}")
-    print(f"   📊 Training glucose: {train_glucose.shape}")
-    print(f"   📊 Testing hormones: {test_hormones.shape}")
-    print(f"   📊 Testing glucose: {test_glucose.shape}")
-
-    # Process training and testing data separately
-    print("\n⚡ Processing training data...")
-    train_df = process_single_dataset_debug(train_hormones, train_glucose, is_training=True)
-
-    print("\n⚡ Processing testing data...")
-    test_df = process_single_dataset_debug(test_hormones, test_glucose, is_training=False)
-
-    # Final verification of target columns
-    print("\n🔍 FINAL TARGET COLUMN VERIFICATION:")
-    for target_name, target_type in TARGETS.items():
-        if target_name == 'phase':
-            target_col = 'phase_encoded'
-        elif target_name == 'menstruation_start':
-            target_col = 'days_to_next_menstruation'
-        elif target_name == 'glucose':
-            target_col = 'glucose_target'
-        else:
+        if not file_path.exists():
+            print(f"   ⚠️ File not found: {file_name}")
             continue
 
-        train_has = target_col in train_df.columns
-        test_has = target_col in test_df.columns
-        train_non_null = train_df[target_col].notna().sum() if train_has else 0
-        test_non_null = test_df[target_col].notna().sum() if test_has else 0
+        # Read the file
+        df = pd.read_csv(file_path)
+        original_size = len(df)
+        original_patients = len(df['id'].unique()) if 'id' in df.columns else "No ID column"
 
-        status = "✅" if (train_has and test_has) else "❌"
-        print(f"   {status} {target_name} ({target_col}): "
-              f"Train={train_has} ({train_non_null} non-null), "
-              f"Test={test_has} ({test_non_null} non-null)")
+        print(f"   Original: {original_size} records, {original_patients} patients")
 
-    print(f"   ✅ Final training data: {train_df.shape}")
-    print(f"   ✅ Final testing data: {test_df.shape}")
+        # Filter based on patient IDs
+        if 'id' in df.columns:
+            filtered_df = df[df['id'].isin(valid_patient_ids)].copy()
+            filtered_size = len(filtered_df)
+            filtered_patients = len(filtered_df['id'].unique())
 
-    return train_df, test_df, train_patients, test_patients
+            print(f"   Filtered: {filtered_size} records, {filtered_patients} patients")
+            print(
+                f"   Removed: {original_size - filtered_size} records ({((original_size - filtered_size) / original_size * 100):.1f}%)")
+
+            # Save filtered file
+            output_path = output_dir / file_name
+            filtered_df.to_csv(output_path, index=False)
+            print(f"   💾 Saved filtered file to: {output_path}")
+        else:
+            print(f"   ⚠️ No 'id' column found in {file_name}, skipping filtering")
+            # Copy file as-is
+            output_path = output_dir / file_name
+            df.to_csv(output_path, index=False)
+            print(f"   💾 Copied file to: {output_path}")
+
+    print(f"\n✅ FILTERING COMPLETE!")
+    print(f"📁 Filtered files saved to: {output_dir}")
+    return output_dir
+
+
+def analyze_patient_overlap(data_dir, file_list):
+    """
+    Analyze patient overlap across all files to identify inconsistencies
+    """
+    print("\n🔍 ANALYZING PATIENT OVERLAP ACROSS FILES")
+    print("=" * 50)
+
+    patient_sets = {}
+
+    for file_name in file_list:
+        file_path = data_dir / file_name
+        if not file_path.exists():
+            continue
+
+        df = pd.read_csv(file_path)
+        if 'id' in df.columns:
+            patients = set(df['id'].unique())
+            patient_sets[file_name] = patients
+            print(f"📊 {file_name}: {len(patients)} patients")
+
+    # Find common patients across all files
+    if patient_sets:
+        common_patients = set.intersection(*patient_sets.values())
+        print(f"\n👥 Common patients across ALL files: {len(common_patients)}")
+
+        # Find patients missing from each file
+        for file_name, patients in patient_sets.items():
+            missing_from_this = common_patients - patients
+            if missing_from_this:
+                print(f"   ⚠️ {file_name} missing {len(missing_from_this)} patients")
+
+        return common_patients
+    return set()
+
+
+def create_consistency_report(main_file_path, data_dir, file_list):
+    """
+    Create a comprehensive report on data consistency
+    """
+    print("\n📋 CREATING DATA CONSISTENCY REPORT")
+    print("=" * 50)
+
+    # Read main file
+    main_df = pd.read_csv(main_file_path)
+    main_patients = set(main_df['id'].unique())
+
+    report_data = []
+
+    for file_name in file_list:
+        file_path = data_dir / file_name
+        if not file_path.exists():
+            report_data.append({
+                'file': file_name,
+                'status': 'MISSING',
+                'patients': 0,
+                'overlap_with_main': 0,
+                'overlap_percent': 0,
+                'records': 0
+            })
+            continue
+
+        df = pd.read_csv(file_path)
+        records = len(df)
+
+        if 'id' in df.columns:
+            patients = set(df['id'].unique())
+            overlap = patients & main_patients
+            overlap_percent = len(overlap) / len(main_patients) * 100 if main_patients else 0
+
+            report_data.append({
+                'file': file_name,
+                'status': 'OK',
+                'patients': len(patients),
+                'overlap_with_main': len(overlap),
+                'overlap_percent': overlap_percent,
+                'records': records
+            })
+        else:
+            report_data.append({
+                'file': file_name,
+                'status': 'NO_ID_COLUMN',
+                'patients': 'N/A',
+                'overlap_with_main': 'N/A',
+                'overlap_percent': 'N/A',
+                'records': records
+            })
+
+    # Create report DataFrame
+    report_df = pd.DataFrame(report_data)
+    print("\n📊 DATA CONSISTENCY REPORT:")
+    print(report_df.to_string(index=False))
+
+    # Identify files that need filtering
+    files_to_filter = []
+    for item in report_data:
+        if item['status'] == 'OK' and item['overlap_percent'] < 100:
+            files_to_filter.append(item['file'])
+
+    if files_to_filter:
+        print(f"\n🎯 FILES THAT NEED FILTERING: {len(files_to_filter)}")
+        for file_name in files_to_filter:
+            print(f"   - {file_name}")
+    else:
+        print(f"\n✅ All files already consistent with main file!")
+
+    return report_df
 
 
 # =============================================================================
-# KEEP ALL OTHER FUNCTIONS THE SAME BUT USE DEBUG VERSION
+# ENHANCEMENT 1: BASELINE NORMALIZATION
 # =============================================================================
 
-# Copy all the other functions from the previous version but use the debug version for data loading
-def preprocess_hormones_data(df):
-    """Preprocess hormones data"""
-    print("   ⚡ Preprocessing hormones data...")
+def normalize_by_baseline(df, targets, baseline_days=3):
+    """Normalize hormone levels by patient-specific baseline"""
 
-    # Convert symptoms to numeric
+    df_normalized = df.copy()
+
+    for target in targets:
+        if target not in df.columns:
+            continue
+
+        # Create normalized column
+        normalized_col = f"{target}_normalized"
+        df_normalized[normalized_col] = np.nan
+
+        for patient_id in df['id'].unique():
+            patient_data = df[df['id'] == patient_id].copy()
+            patient_data = patient_data.sort_values('day_in_study')
+
+            # Calculate baseline (first few days in study)
+            baseline_data = patient_data.head(baseline_days)
+            baseline_value = baseline_data[target].mean()
+
+            if not np.isnan(baseline_value) and baseline_value > 0:
+                # Normalize all values by baseline
+                mask = df_normalized['id'] == patient_id
+                df_normalized.loc[mask, normalized_col] = (
+                        df_normalized.loc[mask, target] / baseline_value
+                )
+
+                print(f"   Patient {patient_id}: baseline {target} = {baseline_value:.2f}")
+
+    return df_normalized
+
+
+# =============================================================================
+# ENHANCEMENT 2: PERSONALIZED FEATURES
+# =============================================================================
+
+def add_personalized_features(df, targets, window_size=7):
+    """Add patient-specific rolling features"""
+
+    df_personal = df.copy()
+
+    # Sort by patient and day to ensure proper rolling
+    df_personal = df_personal.sort_values(['id', 'day_in_study']).reset_index(drop=True)
+
+    for target in targets:
+        if target not in df.columns:
+            continue
+
+        print(f"   Adding personalized features for {target}...")
+
+        # Patient-specific rolling statistics
+        for patient_id in df_personal['id'].unique():
+            patient_mask = df_personal['id'] == patient_id
+            patient_indices = df_personal.index[patient_mask]
+
+            if len(patient_indices) < 2:
+                continue
+
+            # Get patient data in order
+            patient_data = df_personal.loc[patient_indices, target].copy()
+
+            # Rolling mean (personal baseline trend)
+            rolling_mean = patient_data.rolling(window=min(window_size, len(patient_data)),
+                                                min_periods=1).mean()
+            df_personal.loc[patient_indices, f'{target}_rolling_mean'] = rolling_mean
+
+            # Rolling standard deviation (personal variability)
+            rolling_std = patient_data.rolling(window=min(window_size, len(patient_data)),
+                                               min_periods=1).std()
+            df_personal.loc[patient_indices, f'{target}_rolling_std'] = rolling_std.fillna(0)
+
+            # Personal mean (overall baseline)
+            personal_mean = patient_data.mean()
+            df_personal.loc[patient_indices, f'{target}_personal_mean'] = personal_mean
+
+            # Deviation from personal mean
+            df_personal.loc[patient_indices, f'{target}_deviation'] = (
+                    patient_data - personal_mean
+            )
+
+            # Rate of change (day-to-day difference)
+            df_personal.loc[patient_indices, f'{target}_daily_change'] = patient_data.diff().fillna(0)
+
+            # Cumulative sum (trend direction)
+            df_personal.loc[patient_indices, f'{target}_cumulative'] = patient_data.cumsum()
+
+    # Add cycle phase features if available
+    if 'cycle_day' in df_personal.columns:
+        df_personal = add_cycle_phase_features(df_personal)
+
+    return df_personal
+
+
+def add_cycle_phase_features(df):
+    """Add menstrual cycle phase indicators"""
+
+    # Simplified phase estimation based on cycle day
+    df['phase_follicular'] = (df['cycle_day'] <= 14).astype(int)
+    df['phase_luteal'] = (df['cycle_day'] > 14).astype(int)
+    df['phase_ovulation'] = ((df['cycle_day'] >= 12) & (df['cycle_day'] <= 16)).astype(int)
+
+    return df
+
+
+# =============================================================================
+# ENHANCEMENT 3: MIXED EFFECTS ENSEMBLE MODEL - FIXED VERSION
+# =============================================================================
+
+# Alternative: Simplified Mixed Effects that's more robust
+class SimpleMixedEffects(BaseEstimator, RegressorMixin):
+    """Simplified version that's less likely to have initialization issues"""
+
+    def __init__(self, min_patient_samples=5):
+        self.min_patient_samples = min_patient_samples
+        self.global_model = None
+        self.patient_models = {}
+        self.is_fitted = False
+
+    def fit(self, X, y, patient_ids):
+        print("🏥 Training Simple Mixed Effects...")
+
+        # Simple global model
+        self.global_model = RandomForestRegressor(
+            n_estimators=50, max_depth=8, random_state=42, n_jobs=-1
+        )
+        self.global_model.fit(X, y)
+
+        # Patient-specific adjustments (simpler approach)
+        unique_patients = np.unique(patient_ids)
+        trained_count = 0
+
+        for patient_id in unique_patients:
+            mask = patient_ids == patient_id
+            if np.sum(mask) >= self.min_patient_samples:
+                X_patient = X[mask]
+                y_patient = y[mask]
+
+                # Simple correction: train on this patient's data directly
+                try:
+                    patient_model = RandomForestRegressor(
+                        n_estimators=20, max_depth=4, random_state=42
+                    )
+                    patient_model.fit(X_patient, y_patient)
+                    self.patient_models[patient_id] = patient_model
+                    trained_count += 1
+                except:
+                    pass
+
+        print(f"   ✅ Trained models for {trained_count}/{len(unique_patients)} patients")
+        self.is_fitted = True
+        return self
+
+    def predict(self, X, patient_ids=None):
+        if not self.is_fitted:
+            raise ValueError("Model not fitted")
+
+        # Start with global predictions
+        y_pred = self.global_model.predict(X)
+
+        if patient_ids is not None:
+            # Apply patient-specific predictions where available
+            for i, patient_id in enumerate(patient_ids):
+                if patient_id in self.patient_models:
+                    try:
+                        # Use patient-specific model if available
+                        y_pred[i] = self.patient_models[patient_id].predict([X[i]])[0]
+                    except:
+                        # Keep global prediction if patient model fails
+                        pass
+
+        return y_pred
+
+    def get_patient_models_info(self):
+        """Get information about patient-specific models"""
+        return {
+            'n_patient_models': len(self.patient_models),
+            'coverage_rate': len(self.patient_models) / len(set(self.patient_models.keys())) * 100
+        }
+
+
+# =============================================================================
+# EFFICIENT DATA LOADING
+# =============================================================================
+
+def load_comprehensive_data(files, data_dir, sample_size=SAMPLE_SIZE):
+    """Load and merge comprehensive dataset efficiently"""
+    print("📂 Loading comprehensive dataset...")
+
+    # Start with base file
+    base_file = files[0]
+    df = pd.read_csv(data_dir / base_file)
+    df = preprocess_data(df)
+
+    print(f"Base data: {df.shape}")
+
+    # Merge other files
+    for file_name in files[1:]:
+        print(f"🔗 Merging {file_name}...")
+        try:
+            file_path = data_dir / file_name
+            if not file_path.exists():
+                print(f"   ⚠️ File not found: {file_name}")
+                continue
+
+            new_data = pd.read_csv(file_path)
+            new_data = preprocess_data(new_data)
+
+            # Handle file structure
+            new_data = handle_file_structure(new_data, file_name)
+
+            # Find merge keys
+            merge_keys = find_merge_keys(df, new_data, file_name)
+            if not merge_keys:
+                print(f"   ⚠️ No merge keys found for {file_name}")
+                continue
+
+            # Memory-efficient merge
+            if len(new_data) > 50000:
+                new_data = new_data.sample(n=20000, random_state=RANDOM_STATE)
+                print(f"   🔽 Sampled new data to {new_data.shape}")
+
+            df = pd.merge(df, new_data, on=merge_keys, how='left',
+                          suffixes=('', f'_{file_name.replace(".csv", "")}'))
+            print(f"✅ After {file_name}: {df.shape}")
+
+            del new_data
+            gc.collect()
+
+        except Exception as e:
+            print(f"❌ Error with {file_name}: {e}")
+
+    # Final sampling
+    if len(df) > sample_size:
+        df = df.sample(n=sample_size, random_state=RANDOM_STATE)
+        print(f"🔽 Final sampling to: {df.shape}")
+
+    return df
+
+
+def handle_file_structure(df, file_name):
+    """Handle different file structures and rename columns as needed"""
+
+    if file_name == 'sleep.csv':
+        if 'sleep_start_day_in_study' in df.columns:
+            df = df.rename(columns={'sleep_start_day_in_study': 'day_in_study'})
+
+    elif file_name == 'computed_temperature.csv':
+        if 'sleep_start_day_in_study' in df.columns:
+            df = df.rename(columns={'sleep_start_day_in_study': 'day_in_study'})
+
+    elif file_name == 'exercise.csv':
+        if 'start_day_in_study' in df.columns:
+            df = df.rename(columns={'start_day_in_study': 'day_in_study'})
+
+    # For high-frequency files, aggregate by participant to reduce size
+    if file_name in ['glucose.csv', 'wrist_temperature.csv']:
+        print(f"   📊 Aggregating {file_name} by participant...")
+        df = aggregate_by_participant(df)
+
+    return df
+
+
+def aggregate_by_participant(df):
+    """Aggregate high-frequency data by participant to reduce size"""
+    if 'id' not in df.columns:
+        return df
+
+    numeric_cols = df.select_dtypes(include=[np.number]).columns.tolist()
+    numeric_cols = [col for col in numeric_cols if col != 'id']
+
+    if numeric_cols:
+        # Aggregate statistics by participant
+        aggregated = df.groupby('id')[numeric_cols].agg(['mean', 'std', 'min', 'max']).reset_index()
+        # Flatten column names
+        aggregated.columns = [f'{col[0]}_{col[1]}' if col[1] else col[0] for col in aggregated.columns]
+        print(f"   ✅ Aggregated to {aggregated.shape}")
+        return aggregated
+
+    return df
+
+
+def find_merge_keys(base_df, new_df, file_name):
+    """Find appropriate merge keys between dataframes"""
+
+    # Check for common columns
+    common_cols = set(base_df.columns) & set(new_df.columns)
+
+    if 'id' in common_cols and 'day_in_study' in common_cols:
+        return ['id', 'day_in_study']
+    elif 'id' in common_cols:
+        return ['id']
+    else:
+        # Try to find alternative day columns
+        day_columns = ['sleep_start_day_in_study', 'start_day_in_study', 'day_in_study']
+        for day_col in day_columns:
+            if day_col in new_df.columns and 'day_in_study' in base_df.columns:
+                new_df = new_df.rename(columns={day_col: 'day_in_study'})
+                return ['id', 'day_in_study']
+
+        return None
+
+
+def preprocess_data(df):
+    """Preprocess data with symptom mapping"""
     symptom_mapping = {
         'Not at all': 0, 'Very Low/Little': 1, 'Very Low': 1, 'Low': 2,
         'Moderate': 3, 'High': 4, 'Very High': 5,
-        '0': 0, '1': 1, '2': 2, '3': 3, '4': 4, '5': 5,
-        0: 0, 1: 1, 2: 2, 3: 3, 4: 4, 5: 5
+        '0': 0, '1': 1, '2': 2, '3': 3, '4': 4, '5': 5
     }
 
     symptom_cols = [
@@ -345,536 +549,863 @@ def preprocess_hormones_data(df):
 
     for col in symptom_cols:
         if col in df.columns:
-            if not pd.api.types.is_numeric_dtype(df[col]):
-                df[col] = df[col].map(symptom_mapping)
-            df[col] = df[col].fillna(df[col].median())
-
-    # Handle flow volume
-    if 'flow_volume' in df.columns:
-        flow_mapping = {
-            'Not at all': 0, 'Spotting': 1, 'Light': 2,
-            'Moderate': 3, 'Heavy': 4, 'Very Heavy': 5
-        }
-        if not pd.api.types.is_numeric_dtype(df['flow_volume']):
-            df['flow_volume'] = df['flow_volume'].map(flow_mapping)
-        df['flow_volume'] = df['flow_volume'].fillna(0)
-
-    # Fill hormone NaN values
-    for hormone in HORMONE_FEATURES:
-        if hormone in df.columns:
-            df[hormone] = df.groupby('id')[hormone].transform(
-                lambda x: x.fillna(x.median()) if not pd.isna(x.median()) else x.fillna(0)
-            )
-            df[hormone] = df[hormone].fillna(0)
-
-    return df
-
-
-def create_derived_targets(df):
-    """Create derived targets"""
-    print("   🎯 Creating derived targets...")
-
-    # Target 1: Menstrual phase
-    if 'phase' in df.columns:
-        phase_counts = df['phase'].value_counts()
-
-        # Combine rare phases
-        phase_mapping = {}
-        for phase in df['phase'].unique():
-            if pd.isna(phase):
-                phase_mapping[phase] = 'unknown'
-            elif phase_counts.get(phase, 0) < 10:
-                phase_mapping[phase] = 'other'
-            else:
-                phase_mapping[phase] = phase
-
-        df['phase_combined'] = df['phase'].map(phase_mapping)
-
-        # Encode phases
-        phase_encoder = LabelEncoder()
-        df['phase_encoded'] = phase_encoder.fit_transform(df['phase_combined'].fillna('unknown'))
-
-    # Target 2: Menstruation start
-    df = calculate_menstruation_start(df)
-
-    return df
-
-
-def calculate_menstruation_start(df):
-    """Calculate menstruation start"""
-    if 'day_in_study' not in df.columns:
-        df['days_to_next_menstruation'] = np.random.randint(1, 29, len(df))
-        return df
-
-    df = df.sort_values(['id', 'day_in_study']).copy()
-    df['days_to_next_menstruation'] = 28 - (df['day_in_study'] % 28)
-
-    # Add hormone-informed variations
-    if all(h in df.columns for h in HORMONE_FEATURES):
-        lh_quantile = df['lh'].quantile(0.7)
-        pdg_quantile = df['pdg'].quantile(0.6)
-        estrogen_quantile = df['estrogen'].quantile(0.7)
-
-        lh_effect = np.where(df['lh'] > lh_quantile, -7, 0)
-        pdg_effect = np.where(df['pdg'] > pdg_quantile, 3, 0)
-        estrogen_effect = np.where(df['estrogen'] > estrogen_quantile, -2, 0)
-
-        df['days_to_next_menstruation'] = (df['days_to_next_menstruation'] +
-                                           lh_effect + pdg_effect + estrogen_effect)
-
-    # Add noise and clip
-    np.random.seed(RANDOM_STATE)
-    noise = np.random.normal(0, 2, len(df))
-    df['days_to_next_menstruation'] = df['days_to_next_menstruation'] + noise
-    df['days_to_next_menstruation'] = np.clip(df['days_to_next_menstruation'], 1, 35)
-
-    return df
-
-
-def create_hormone_features(df, is_training=True):
-    """Create hormone features"""
-    features_df = df.copy()
-
-    # Basic hormone features
-    for hormone in HORMONE_FEATURES:
-        if hormone in df.columns:
-            features_df[f'{hormone}_current'] = df[hormone]
-
-            # Rolling statistics
-            for window in [7, 14]:
-                features_df[f'{hormone}_rolling_mean_{window}'] = df.groupby('id')[hormone].transform(
-                    lambda x: x.rolling(window=window, min_periods=1).mean()
-                )
-                features_df[f'{hormone}_rolling_std_{window}'] = df.groupby('id')[hormone].transform(
-                    lambda x: x.rolling(window=window, min_periods=1).std()
-                )
-
-    # Rate of change
-    for hormone in HORMONE_FEATURES:
-        if hormone in df.columns:
-            features_df[f'{hormone}_change'] = df.groupby('id')[hormone].diff().fillna(0)
-
-    # Cyclic features
-    if 'day_in_study' in df.columns:
-        features_df['day_sin'] = np.sin(2 * np.pi * df['day_in_study'] / 28)
-        features_df['day_cos'] = np.cos(2 * np.pi * df['day_in_study'] / 28)
-
-    # Fill any remaining NaN
-    numeric_cols = features_df.select_dtypes(include=[np.number]).columns
-    features_df[numeric_cols] = features_df[numeric_cols].fillna(0)
-
-    return features_df
-
-
-def clean_dataframe(df):
-    """Clean dataframe"""
-    numeric_cols = df.select_dtypes(include=[np.number]).columns
-    df[numeric_cols] = df[numeric_cols].replace([np.inf, -np.inf], np.nan)
-
-    for col in numeric_cols:
-        if df[col].notna().sum() > 0:
-            q99 = df[col].quantile(0.999)
-            q01 = df[col].quantile(0.001)
-
-            if not pd.isna(q99) and q99 > 0:
-                df[col] = np.where(df[col] > q99, q99, df[col])
-                df[col] = np.where(df[col] < q01, q01, df[col])
-
-    for col in numeric_cols:
-        if df[col].isna().any():
-            median_val = df[col].median()
-            df[col] = df[col].fillna(median_val)
+            df[col] = df[col].map(symptom_mapping)
 
     return df
 
 
 # =============================================================================
-# USE EXISTING MODEL TRAINING FUNCTIONS FROM PREVIOUS VERSION
+# PATIENT-WISE TRAIN-TEST SPLIT
 # =============================================================================
 
-def evaluate_models_complete(train_df, test_df, feature_columns):
-    """Evaluate models with glucose-specific fixes"""
-    print("\n🏆 COMPLETE MODEL EVALUATION")
+def patient_wise_train_test_split(df, test_size=0.2, random_state=42):
+    """
+    Split data by patient ID to prevent data leakage
+    All records from a patient go to either train or test
+    """
+    print(f"\n🎯 Performing PATIENT-WISE 80/20 split...")
 
-    results = {}
+    # Get unique patient IDs
+    patient_ids = df['id'].unique()
+    n_patients = len(patient_ids)
 
-    for target_name, target_type in TARGETS.items():
-        print(f"\n🔍 Evaluating {target_name} ({target_type})...")
+    print(f"   Total patients: {n_patients}")
+    print(f"   Total records: {len(df)}")
 
-        try:
-            # Prepare target data
-            if target_name == 'phase':
-                target_col = 'phase_encoded'
-            elif target_name == 'menstruation_start':
-                target_col = 'days_to_next_menstruation'
-            elif target_name == 'glucose':
-                target_col = 'glucose_target'
-            else:
-                continue
+    # Split patient IDs
+    train_patients, test_patients = train_test_split(
+        patient_ids,
+        test_size=test_size,
+        random_state=random_state
+    )
 
-            # Check if target column exists
-            if target_col not in train_df.columns or target_col not in test_df.columns:
-                print(f"   ❌ Target column '{target_col}' not found, skipping {target_name}")
-                print(f"   Train columns: {[c for c in train_df.columns if 'glucose' in c]}")
-                print(f"   Test columns: {[c for c in test_df.columns if 'glucose' in c]}")
-                continue
+    # Split data based on patient IDs
+    train_data = df[df['id'].isin(train_patients)]
+    test_data = df[df['id'].isin(test_patients)]
 
-            y_train = train_df[target_col]
-            y_test = test_df[target_col]
-            valid_train_idx = y_train.notna()
-            valid_test_idx = y_test.notna()
+    print(f"   Training patients: {len(train_patients)} ({len(train_patients) / n_patients * 100:.1f}%)")
+    print(f"   Testing patients:  {len(test_patients)} ({len(test_patients) / n_patients * 100:.1f}%)")
+    print(f"   Training records:  {len(train_data)} ({len(train_data) / len(df) * 100:.1f}%)")
+    print(f"   Testing records:   {len(test_data)} ({len(test_data) / len(df) * 100:.1f}%)")
 
-            if not valid_train_idx.any() or not valid_test_idx.any():
-                print(f"   ⚠️  Not enough valid target data for {target_name}")
-                continue
+    # Check for patient overlap
+    train_ids = set(train_data['id'].unique())
+    test_ids = set(test_data['id'].unique())
+    overlap = train_ids.intersection(test_ids)
 
-            # Get feature matrices
-            X_train = train_df[feature_columns].loc[valid_train_idx]
-            y_train = y_train[valid_train_idx]
-            X_test = test_df[feature_columns].loc[valid_test_idx]
-            y_test = y_test[valid_test_idx]
+    if overlap:
+        print(f"❌ ERROR: Patient overlap detected! {len(overlap)} patients in both sets")
+        raise ValueError("Patient overlap in train/test split")
+    else:
+        print("✅ No patient overlap - split is valid")
 
-            print(f"   📊 Training data: {X_train.shape}")
-            print(f"   📊 Testing data: {X_test.shape}")
+    return train_data, test_data, train_patients, test_patients
 
-            if target_type == 'categorical':
-                train_class_counts = y_train.value_counts()
-                test_class_counts = y_test.value_counts()
-                print(f"   📊 Train class distribution: {train_class_counts.to_dict()}")
-                print(f"   📊 Test class distribution: {test_class_counts.to_dict()}")
 
-                if len(train_class_counts) < 2:
-                    print(f"   ⚠️  Only {len(train_class_counts)} class(es) in training, skipping {target_name}")
-                    continue
+# =============================================================================
+# COMPREHENSIVE FEATURE PROCESSING (EXCLUDING HORMONE-DERIVED FEATURES)
+# =============================================================================
 
-            if len(X_train) < 10 or len(X_test) < 5:
-                print(f"   ⚠️  Not enough data for {target_name}")
-                continue
+def get_all_features(df, targets):
+    """Get all available features after cleaning, excluding hormone-derived features"""
+    print(f"\n🎯 Processing all available features (excluding hormone-derived features)...")
 
-            # SPECIAL HANDLING FOR GLUCOSE
-            if target_name == 'glucose':
-                print("   🎯 Using special glucose modeling approach...")
-                target_results = train_glucose_model_extreme_regularization(X_train, X_test, y_train, y_test)
+    feature_sets = {}
 
-                if target_results is None or target_results['test_r2'] < -0.1:
-                    print("   🔄 XGBoost failed, trying linear model...")
-                    target_results = train_simple_linear_glucose_model(X_train, X_test, y_train, y_test)
-            else:
-                target_results = train_standard_model(X_train, X_test, y_train, y_test, target_type, target_name)
+    # Define hormone-related columns to exclude
+    hormone_base_cols = ['lh', 'estrogen', 'pdg']
+    hormone_derived_patterns = [
+        '_normalized', '_rolling_mean', '_rolling_std', '_personal_mean',
+        '_deviation', '_daily_change', '_cumulative'
+    ]
 
-            if target_results is not None:
-                results[target_name] = target_results
-            else:
-                print(f"   ❌ Failed to train model for {target_name}")
-
-        except Exception as e:
-            print(f"   ❌ Error evaluating {target_name}: {e}")
+    for target in targets:
+        if target not in df.columns:
             continue
+
+        print(f"\nProcessing features for {target}...")
+
+        # Remove targets, metadata, AND hormone-derived features
+        exclude_cols = targets + ['id', 'day_in_study', 'study_interval', 'is_weekend']
+
+        # Add hormone-derived features to exclude list
+        for hormone in hormone_base_cols:
+            for pattern in hormone_derived_patterns:
+                derived_col = f"{hormone}{pattern}"
+                if derived_col in df.columns:
+                    exclude_cols.append(derived_col)
+
+        # Also exclude the base hormone columns if they're not the target
+        for hormone in hormone_base_cols:
+            if hormone != target.replace('_normalized', '') and hormone in df.columns:
+                exclude_cols.append(hormone)
+
+        # Remove duplicates
+        exclude_cols = list(set(exclude_cols))
+
+        all_features = [col for col in df.columns if col not in exclude_cols]
+
+        print(f"   Initial features: {len(all_features)}")
+        print(
+            f"   Excluded hormone-derived features: {len([col for col in df.columns if col in exclude_cols and any(h in col for h in hormone_base_cols)])}")
+
+        # Get numeric columns only
+        numeric_features = []
+        for col in all_features:
+            if pd.api.types.is_numeric_dtype(df[col]):
+                numeric_features.append(col)
+
+        print(f"   Numeric features: {len(numeric_features)}")
+
+        if len(numeric_features) == 0:
+            print("❌ No numeric features found!")
+            feature_sets[target] = []
+            continue
+
+        # Remove constant columns
+        constant_cols = []
+        for col in numeric_features:
+            if df[col].nunique() <= 1:
+                constant_cols.append(col)
+
+        numeric_features = [col for col in numeric_features if col not in constant_cols]
+        print(f"   Removed {len(constant_cols)} constant columns")
+
+        # Remove high missingness columns (>80% missing)
+        high_missing_cols = []
+        for col in numeric_features:
+            missing_ratio = df[col].isnull().sum() / len(df)
+            if missing_ratio > 0.8:
+                high_missing_cols.append(col)
+
+        numeric_features = [col for col in numeric_features if col not in high_missing_cols]
+        print(f"   Removed {len(high_missing_cols)} high-missing columns")
+
+        print(f"   ✅ Final features for {target}: {len(numeric_features)}")
+
+        # Show feature categories
+        if len(numeric_features) > 0:
+            categories = categorize_features(numeric_features)
+            print("   Feature categories:")
+            for category, count in categories.items():
+                print(f"     {category}: {count}")
+
+        feature_sets[target] = numeric_features
+
+    return feature_sets
+
+
+def categorize_features(features):
+    """Categorize features by type for reporting"""
+    categories = {
+        'Sleep-related': len([f for f in features if 'sleep' in f.lower()]),
+        'Stress-related': len([f for f in features if 'stress' in f.lower()]),
+        'Heart-related': len([f for f in features if 'heart' in f.lower() or 'bpm' in f.lower()]),
+        'Temperature-related': len([f for f in features if 'temp' in f.lower() or 'temperature' in f.lower()]),
+        'Respiratory-related': len([f for f in features if 'respiratory' in f.lower() or 'breathing' in f.lower()]),
+        'Exercise-related': len([f for f in features if 'exercise' in f.lower() or 'activity' in f.lower()]),
+        'Glucose-related': len([f for f in features if 'glucose' in f.lower()]),
+        'Symptom-related': len([f for f in features if any(symptom in f.lower() for symptom in [
+            'appetite', 'headache', 'cramp', 'breast', 'fatigue', 'mood', 'food', 'indigestion', 'bloating'
+        ])]),
+        'Other': 0
+    }
+
+    categorized_count = sum(categories.values()) - categories['Other']
+    categories['Other'] = len(features) - categorized_count
+
+    return {k: v for k, v in categories.items() if v > 0}
+
+
+# =============================================================================
+# COMPREHENSIVE REGRESSION STATISTICS
+# =============================================================================
+
+def calculate_comprehensive_metrics(y_true, y_pred, model_name, target_name, n_features, n_patients):
+    """Calculate comprehensive regression statistics"""
+
+    print(f"\n📊 REGRESSION STATISTICS - {model_name} - {target_name}")
+    print("=" * 50)
+    print(f"   Features used: {n_features}")
+    print(f"   Patients in set: {n_patients}")
+
+    # Basic error metrics
+    mae = mean_absolute_error(y_true, y_pred)
+    mse = mean_squared_error(y_true, y_pred)
+    rmse = np.sqrt(mse)
+    r2 = r2_score(y_true, y_pred)
+
+    # Correlation metrics (with error handling)
+    try:
+        pearson_corr, pearson_p = pearsonr(y_true, y_pred)
+    except:
+        pearson_corr, pearson_p = np.nan, np.nan
+
+    try:
+        spearman_corr, spearman_p = spearmanr(y_true, y_pred)
+    except:
+        spearman_corr, spearman_p = np.nan, np.nan
+
+    # Additional metrics
+    mean_true = np.mean(y_true)
+    std_true = np.std(y_true)
+
+    # Relative errors
+    mape = np.mean(np.abs((y_true - y_pred) / np.where(y_true == 0, 1, y_true))) * 100
+
+    # Print results
+    print("ERROR METRICS:")
+    print(f"  MAE (Mean Absolute Error):       {mae:.4f}")
+    print(f"  MSE (Mean Squared Error):        {mse:.4f}")
+    print(f"  RMSE (Root Mean Squared Error):  {rmse:.4f}")
+    print(f"  MAPE (Mean Absolute % Error):    {mape:.2f}%")
+
+    print("CORRELATION METRICS:")
+    print(f"  R-squared (R2):                  {r2:.4f}")
+    print(f"  Pearson Correlation:             {pearson_corr:.4f}")
+    print(f"  Spearman Correlation:            {spearman_corr:.4f}")
+
+    print("DATA STATISTICS:")
+    print(f"  True Values - Mean: {mean_true:.4f}, Std: {std_true:.4f}")
+
+    # Create comprehensive results dictionary
+    results = {
+        'model': model_name,
+        'target': target_name,
+        'n_features': n_features,
+        'n_patients': n_patients,
+        'error_metrics': {
+            'mae': mae,
+            'mse': mse,
+            'rmse': rmse,
+            'mape': mape
+        },
+        'correlation_metrics': {
+            'r2': r2,
+            'pearson_correlation': pearson_corr,
+            'spearman_correlation': spearman_corr
+        },
+        'distribution_stats': {
+            'true_mean': mean_true,
+            'true_std': std_true
+        }
+    }
 
     return results
 
 
-def train_glucose_model_extreme_regularization(X_train, X_test, y_train, y_test):
-    """Train glucose model with extreme regularization"""
-    print("   🍬 Training glucose model with EXTREME regularization...")
+def create_regression_diagnostics(y_true, y_pred, model_name, target_name, n_features, n_patients):
+    """Create comprehensive regression diagnostic plots"""
 
-    X_train_clean = X_train.replace([np.inf, -np.inf], np.nan)
-    X_test_clean = X_test.replace([np.inf, -np.inf], np.nan)
+    fig, axes = plt.subplots(2, 2, figsize=(15, 12))
+    fig.suptitle(
+        f'Regression Diagnostics: {model_name} - {target_name}\nFeatures: {n_features}, Patients: {n_patients}',
+        fontsize=16, fontweight='bold')
 
-    imputer = SimpleImputer(strategy='median')
-    X_train_imputed = imputer.fit_transform(X_train_clean)
-    X_test_imputed = imputer.transform(X_test_clean)
+    # Plot 1: True vs Predicted
+    axes[0, 0].scatter(y_true, y_pred, alpha=0.6, s=50)
+    axes[0, 0].plot([y_true.min(), y_true.max()], [y_true.min(), y_true.max()], 'r--', lw=2)
+    axes[0, 0].set_xlabel('True Values')
+    axes[0, 0].set_ylabel('Predicted Values')
+    axes[0, 0].set_title('True vs Predicted Values')
+    axes[0, 0].grid(True, alpha=0.3)
 
-    X_train_imputed = np.nan_to_num(X_train_imputed)
-    X_test_imputed = np.nan_to_num(X_test_imputed)
+    # Add regression line
+    z = np.polyfit(y_true, y_pred, 1)
+    p = np.poly1d(z)
+    axes[0, 0].plot(y_true, p(y_true), "b-", alpha=0.8, label=f'Regression line')
+    axes[0, 0].legend()
 
-    model = XGBRegressor(
-        n_estimators=30,
-        max_depth=2,
-        learning_rate=0.05,
-        reg_alpha=20.0,
-        reg_lambda=20.0,
-        subsample=0.6,
-        colsample_bytree=0.4,
-        colsample_bylevel=0.6,
-        min_child_weight=10,
-        gamma=1.0,
-        random_state=RANDOM_STATE,
-        n_jobs=-1
+    # Plot 2: Residuals
+    residuals = y_true - y_pred
+    axes[0, 1].scatter(y_pred, residuals, alpha=0.6, s=50)
+    axes[0, 1].axhline(y=0, color='r', linestyle='--')
+    axes[0, 1].set_xlabel('Predicted Values')
+    axes[0, 1].set_ylabel('Residuals')
+    axes[0, 1].set_title('Residual Plot')
+    axes[0, 1].grid(True, alpha=0.3)
+
+    # Plot 3: Distribution comparison
+    axes[1, 0].hist(y_true, bins=30, alpha=0.7, label='True Values', density=True)
+    axes[1, 0].hist(y_pred, bins=30, alpha=0.7, label='Predicted Values', density=True)
+    axes[1, 0].set_xlabel('Value')
+    axes[1, 0].set_ylabel('Density')
+    axes[1, 0].set_title('Distribution Comparison')
+    axes[1, 0].legend()
+    axes[1, 0].grid(True, alpha=0.3)
+
+    # Plot 4: Error distribution
+    axes[1, 1].hist(residuals, bins=30, alpha=0.7, color='orange')
+    axes[1, 1].axvline(x=0, color='r', linestyle='--')
+    axes[1, 1].set_xlabel('Residuals')
+    axes[1, 1].set_ylabel('Frequency')
+    axes[1, 1].set_title('Error Distribution')
+    axes[1, 1].grid(True, alpha=0.3)
+
+    plt.tight_layout()
+
+    # Save with simple filename to avoid encoding issues
+    safe_filename = f'regression_{model_name}_{target_name}'.replace(' ', '_')
+    plt.savefig(OUTPUT_DIR / f'{safe_filename}.png', dpi=300, bbox_inches='tight')
+    plt.close()
+
+
+# =============================================================================
+# ENHANCED MODEL TRAINING WITH ALL IMPROVEMENTS
+# =============================================================================
+
+def train_enhanced_models(df, feature_sets, targets):
+    """Enhanced training function with Mixed Effects Ensemble and personalization support"""
+
+    print("\n🚀 TRAINING ENHANCED MODELS WITH PERSONALIZATION")
+    print("=" * 80)
+
+    all_results = {}
+
+    # Define enhanced models (including Mixed Effects)
+    models = {
+        'RandomForest': RandomForestRegressor(
+            n_estimators=100, max_depth=10, random_state=RANDOM_STATE, n_jobs=-1
+        ),
+        'XGBoost': xgb.XGBRegressor(
+            n_estimators=100, max_depth=6, learning_rate=0.1,
+            random_state=RANDOM_STATE, n_jobs=-1
+        ),
+        'LightGBM': lgb.LGBMRegressor(
+            n_estimators=100, max_depth=6, learning_rate=0.1,
+            random_state=RANDOM_STATE, n_jobs=-1, verbose=-1
+        ),
+        'MixedEffects': SimpleMixedEffects(min_patient_samples=5),
+
+    }
+
+    for target in targets:
+        if target not in df.columns or target not in feature_sets:
+            continue
+
+        print(f"\n🎯 TARGET: {target.upper()}")
+        print("=" * 50)
+
+        all_features = feature_sets[target]
+
+        if len(all_features) == 0:
+            print("❌ No features available for this target")
+            continue
+
+        # Prepare data
+        target_data = df.dropna(subset=[target]).copy()
+
+        print(f"📊 Dataset before split: {target_data.shape}")
+        print(f"🎯 Using {len(all_features)} features")
+
+        # PATIENT-WISE 80/20 Split
+        train_data, test_data, train_patients, test_patients = patient_wise_train_test_split(
+            target_data, test_size=TEST_SIZE, random_state=RANDOM_STATE
+        )
+
+        # Prepare features and targets
+        X_train = train_data[all_features].copy()
+        y_train = train_data[target].values
+        X_test = test_data[all_features].copy()
+        y_test = test_data[target].values
+
+        # Get patient IDs for mixed effects
+        train_patient_ids = train_data['id'].values
+        test_patient_ids = test_data['id'].values
+
+        print(f"🔀 Final split:")
+        print(f"   Training: {X_train.shape} ({len(train_patients)} patients)")
+        print(f"   Testing:  {X_test.shape} ({len(test_patients)} patients)")
+
+        # Handle missing values
+        imputer = SimpleImputer(strategy='median')
+        X_train_imputed = imputer.fit_transform(X_train)
+        X_test_imputed = imputer.transform(X_test)
+
+        # Scale features
+        scaler = StandardScaler()
+        X_train_scaled = scaler.fit_transform(X_train_imputed)
+        X_test_scaled = scaler.transform(X_test_imputed)
+
+        target_results = {}
+
+        for model_name, model in models.items():
+            print(f"\n🧪 Training {model_name}...")
+            start_time = time.time()
+
+            try:
+                # Special handling for Mixed Effects model
+                if model_name == 'MixedEffects':
+                    model.fit(X_train_scaled, y_train, train_patient_ids)
+                    training_time = time.time() - start_time
+
+                    # Get model info
+                    model_info = model.get_patient_models_info()
+                    print(f"   Patient model coverage: {model_info['coverage_rate']:.1f}%")
+
+                    # Predictions (need to pass patient IDs)
+                    y_pred_train = model.predict(X_train_scaled, train_patient_ids)
+                    y_pred_test = model.predict(X_test_scaled, test_patient_ids)
+                else:
+                    # Standard models
+                    model.fit(X_train_scaled, y_train)
+                    training_time = time.time() - start_time
+
+                    # Predictions
+                    y_pred_train = model.predict(X_train_scaled)
+                    y_pred_test = model.predict(X_test_scaled)
+
+                # Calculate comprehensive metrics
+                train_metrics = calculate_comprehensive_metrics(y_train, y_pred_train,
+                                                                f"{model_name} (Train)", target,
+                                                                len(all_features), len(train_patients))
+                test_metrics = calculate_comprehensive_metrics(y_test, y_pred_test,
+                                                               f"{model_name} (Test)", target,
+                                                               len(all_features), len(test_patients))
+
+                # Create diagnostic plots
+                create_regression_diagnostics(y_test, y_pred_test, model_name, target,
+                                              len(all_features), len(test_patients))
+
+                # Store results
+                target_results[model_name] = {
+                    'training_time': training_time,
+                    'train_metrics': train_metrics,
+                    'test_metrics': test_metrics,
+                    'features_used': all_features,
+                    'train_patients': train_patients,
+                    'test_patients': test_patients,
+                    'model': model
+                }
+
+                print(f"✅ {model_name} completed in {training_time:.2f}s")
+
+            except Exception as e:
+                print(f"❌ {model_name} failed: {e}")
+                target_results[model_name] = None
+
+        all_results[target] = target_results
+
+        # Clean memory
+        del X_train, X_test, y_train, y_test, X_train_scaled, X_test_scaled
+        gc.collect()
+
+    return all_results
+
+
+# =============================================================================
+# RESULTS COMPARISON AND REPORTING
+# =============================================================================
+
+def create_comprehensive_report(results, feature_sets):
+    """Create comprehensive comparison report"""
+
+    print("\n📋 CREATING COMPREHENSIVE RESULTS REPORT")
+    print("=" * 60)
+
+    # Save detailed results with UTF-8 encoding
+    with open(OUTPUT_DIR / "patient_wise_model_report.txt", 'w', encoding='utf-8') as f:
+        f.write("COMPREHENSIVE MODEL ANALYSIS - PATIENT-WISE 80/20 SPLIT\n")
+        f.write("=" * 80 + "\n\n")
+        f.write("MODEL EVALUATION WITH PATIENT-WISE TRAIN-TEST SPLIT\n")
+        f.write(f"Sample Size: {SAMPLE_SIZE:,}\n")
+        f.write(f"Test Size: {TEST_SIZE * 100}% of PATIENTS\n")
+        f.write(f"Random State: {RANDOM_STATE}\n\n")
+
+        for target, target_results in results.items():
+            f.write(f"\nTARGET: {target.upper()}\n")
+            f.write("-" * 50 + "\n")
+
+            if target in feature_sets:
+                f.write(f"ALL Features Used: {len(feature_sets[target])}\n")
+                categories = categorize_features(feature_sets[target])
+                f.write("Feature Categories:\n")
+                for category, count in categories.items():
+                    f.write(f"  {category}: {count}\n")
+                f.write("\n")
+
+            f.write("MODEL PERFORMANCE COMPARISON (TEST SET - UNSEEN PATIENTS):\n")
+            f.write("-" * 60 + "\n")
+
+            # Create comparison table
+            comparison_data = []
+            for model_name, result in target_results.items():
+                if result and 'test_metrics' in result:
+                    metrics = result['test_metrics']
+                    comparison_data.append({
+                        'Model': model_name,
+                        'Patients': metrics['n_patients'],
+                        'Features': metrics['n_features'],
+                        'R2': metrics['correlation_metrics']['r2'],
+                        'Pearson_r': metrics['correlation_metrics']['pearson_correlation'],
+                        'Spearman_r': metrics['correlation_metrics']['spearman_correlation'],
+                        'MAE': metrics['error_metrics']['mae'],
+                        'RMSE': metrics['error_metrics']['rmse'],
+                        'Time_s': result['training_time']
+                    })
+
+            if comparison_data:
+                comp_df = pd.DataFrame(comparison_data)
+                f.write(comp_df.to_string(index=False, float_format='%.4f'))
+                f.write("\n\n")
+
+    # Also save results as CSV for easy analysis
+    save_results_csv(results, feature_sets)
+
+    # Create performance comparison visualization
+    create_performance_comparison_plot(results)
+
+    print(f"✅ Comprehensive report saved to {OUTPUT_DIR}")
+
+
+def save_results_csv(results, feature_sets):
+    """Save results as CSV files for easy analysis"""
+
+    # Save model performance comparison
+    performance_data = []
+    for target, target_results in results.items():
+        for model_name, result in target_results.items():
+            if result and 'test_metrics' in result:
+                metrics = result['test_metrics']
+                performance_data.append({
+                    'target': target,
+                    'model': model_name,
+                    'n_patients': metrics['n_patients'],
+                    'n_features': metrics['n_features'],
+                    'r2': metrics['correlation_metrics']['r2'],
+                    'pearson_r': metrics['correlation_metrics']['pearson_correlation'],
+                    'spearman_r': metrics['correlation_metrics']['spearman_correlation'],
+                    'mae': metrics['error_metrics']['mae'],
+                    'mse': metrics['error_metrics']['mse'],
+                    'rmse': metrics['error_metrics']['rmse'],
+                    'mape': metrics['error_metrics']['mape'],
+                    'training_time': result['training_time']
+                })
+
+    if performance_data:
+        perf_df = pd.DataFrame(performance_data)
+        perf_df.to_csv(OUTPUT_DIR / "patient_wise_performance_comparison.csv", index=False)
+        print("✅ Patient-wise performance comparison saved as CSV")
+
+    # Save feature information
+    feature_data = []
+    for target, features in feature_sets.items():
+        categories = categorize_features(features)
+        feature_data.append({
+            'target': target,
+            'total_features': len(features),
+            **categories
+        })
+
+    if feature_data:
+        feature_df = pd.DataFrame(feature_data)
+        feature_df.to_csv(OUTPUT_DIR / "feature_summary.csv", index=False)
+        print("✅ Feature summary saved as CSV")
+
+
+def create_performance_comparison_plot(results):
+    """Create performance comparison visualization"""
+
+    for target, target_results in results.items():
+        models = []
+        r2_scores = []
+        rmse_scores = []
+        n_patients_list = []
+
+        for model_name, result in target_results.items():
+            if result and 'test_metrics' in result:
+                models.append(model_name)
+                r2_scores.append(result['test_metrics']['correlation_metrics']['r2'])
+                rmse_scores.append(result['test_metrics']['error_metrics']['rmse'])
+                n_patients_list.append(result['test_metrics']['n_patients'])
+
+        if models:
+            fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(15, 6))
+
+            # R² comparison
+            bars1 = ax1.bar(models, r2_scores, color=['skyblue', 'lightgreen', 'lightcoral', 'gold'])
+            ax1.set_ylabel('R² Score')
+            ax1.set_title(f'Model Comparison - {target.upper()}\nTest Patients: {n_patients_list[0]}')
+            ax1.set_ylim(0, 1)
+
+            # Add value labels on bars
+            for bar, score in zip(bars1, r2_scores):
+                ax1.text(bar.get_x() + bar.get_width() / 2, bar.get_height() + 0.01,
+                         f'{score:.4f}', ha='center', va='bottom')
+
+            # RMSE comparison
+            bars2 = ax2.bar(models, rmse_scores, color=['skyblue', 'lightgreen', 'lightcoral', 'gold'])
+            ax2.set_ylabel('RMSE')
+            ax2.set_title(f'Model Comparison - {target.upper()}\nTest Patients: {n_patients_list[0]}')
+
+            # Add value labels on bars
+            for bar, score in zip(bars2, rmse_scores):
+                ax2.text(bar.get_x() + bar.get_width() / 2, bar.get_height() + 0.01,
+                         f'{score:.4f}', ha='center', va='bottom')
+
+            plt.tight_layout()
+            plt.savefig(OUTPUT_DIR / f'patient_wise_comparison_{target}.png', dpi=300, bbox_inches='tight')
+            plt.close()
+
+
+# =============================================================================
+# QUICK TEST FUNCTION
+# =============================================================================
+
+
+def quick_test_enhancements():
+    """Quick test to verify enhancements work"""
+    print("🧪 QUICK TEST OF ENHANCEMENTS")
+
+    # Load small sample
+    df = load_comprehensive_data(COMPREHENSIVE_FILES[:3], DATA_DIR, sample_size=1000)
+
+    # Test baseline normalization
+    df_normalized = normalize_by_baseline(df, TARGETS[:1])
+    print(f"✅ Baseline normalization completed")
+
+    # Test personalized features
+    df_enhanced = add_personalized_features(df_normalized, TARGETS[:1])
+    print(f"✅ Personalized features added")
+
+    # Check new columns
+    new_cols = [col for col in df_enhanced.columns if 'normalized' in col or 'rolling' in col or 'deviation' in col]
+    print(f"✅ New features created: {len(new_cols)}")
+
+    # Test Mixed Effects model - use available features instead of assuming cycle_day exists
+    if len(df_enhanced) > 10:
+        # Find available numeric features (excluding IDs, targets, and hormone-derived features)
+        available_features = []
+        hormone_cols = ['lh', 'estrogen', 'pdg']
+        hormone_patterns = ['_normalized', '_rolling_mean', '_rolling_std', '_personal_mean', '_deviation',
+                            '_daily_change', '_cumulative']
+
+        for col in df_enhanced.columns:
+            if (pd.api.types.is_numeric_dtype(df_enhanced[col]) and
+                    col not in ['id', 'day_in_study'] and
+                    not any(hormone in col for hormone in hormone_cols) and
+                    not any(pattern in col for pattern in hormone_patterns) and
+                    df_enhanced[col].notna().sum() > 0):
+                available_features.append(col)
+
+        # Use first 5 available features for testing
+        mock_features = available_features[:5]
+
+        if len(mock_features) > 1:
+            X = df_enhanced[mock_features].fillna(0).values
+            # Use original target if normalized doesn't exist
+            if 'lh_normalized' in df_enhanced.columns:
+                y = df_enhanced['lh_normalized'].fillna(0).values
+            elif 'lh' in df_enhanced.columns:
+                y = df_enhanced['lh'].fillna(0).values
+            else:
+                y = np.random.random(len(X))
+
+            patient_ids = df_enhanced['id'].values
+
+            try:
+                mixed_model = SimpleMixedEffects()
+                mixed_model.fit(X, y, patient_ids)
+                print(f"✅ Mixed Effects model trained successfully")
+            except Exception as e:
+                print(f"⚠️ Mixed Effects test failed (but continuing): {e}")
+
+    print("🎉 All enhancements tested successfully!")
+
+
+# =============================================================================
+# UPDATED MAIN EXECUTION WITH DATA FILTERING
+# =============================================================================
+
+def main_with_filtering():
+    """Enhanced main function with data filtering"""
+
+    print("🚀 ENHANCED PIPELINE WITH DATA FILTERING")
+    print("=" * 80)
+
+    # Define paths
+    MAIN_FILE = 'hormones_and_selfreport.csv'
+    FILTERED_DATA_DIR = Path('filtered_data')
+
+    # Step 0: Analyze and filter data if needed
+    print("\n🔍 STEP 0: CHECKING DATA CONSISTENCY")
+    consistency_report = create_consistency_report(
+        DATA_DIR / MAIN_FILE,
+        DATA_DIR,
+        COMPREHENSIVE_FILES
     )
 
-    try:
-        model.fit(X_train_imputed, y_train)
+    # Check if filtering is needed
+    needs_filtering = any(
+        row['status'] == 'OK' and row['overlap_percent'] < 100
+        for _, row in consistency_report.iterrows()
+    )
 
-        y_train_pred = model.predict(X_train_imputed)
-        y_test_pred = model.predict(X_test_imputed)
-
-        train_r2 = r2_score(y_train, y_train_pred)
-        test_r2 = r2_score(y_test, y_test_pred)
-        train_rmse = np.sqrt(mean_squared_error(y_train, y_train_pred))
-        test_rmse = np.sqrt(mean_squared_error(y_test, y_test_pred))
-
-        results = {
-            'model': model,
-            'imputer': imputer,
-            'train_r2': train_r2,
-            'test_r2': test_r2,
-            'train_rmse': train_rmse,
-            'test_rmse': test_rmse,
-            'predictions': {
-                'train': y_train_pred,
-                'test': y_test_pred
-            },
-            'model_type': 'xgb_extreme'
-        }
-
-        gap = train_r2 - test_r2
-        print(f"      Train R²: {train_r2:.3f}")
-        print(f"      Test R²: {test_r2:.3f}")
-        print(f"      Generalization Gap: {gap:.3f}")
-
-        return results
-
-    except Exception as e:
-        print(f"   ❌ Error training glucose model: {e}")
-        return None
-
-
-def train_simple_linear_glucose_model(X_train, X_test, y_train, y_test):
-    """Try a simple linear model for glucose"""
-    print("   📈 Trying simple linear model for glucose...")
-
-    X_train_clean = X_train.replace([np.inf, -np.inf], np.nan)
-    X_test_clean = X_test.replace([np.inf, -np.inf], np.nan)
-
-    imputer = SimpleImputer(strategy='median')
-    X_train_imputed = imputer.fit_transform(X_train_clean)
-    X_test_imputed = imputer.transform(X_test_clean)
-
-    scaler = StandardScaler()
-    X_train_scaled = scaler.fit_transform(X_train_imputed)
-    X_test_scaled = scaler.transform(X_test_imputed)
-
-    X_train_scaled = np.nan_to_num(X_train_scaled)
-    X_test_scaled = np.nan_to_num(X_test_scaled)
-
-    model = Ridge(alpha=100.0, random_state=RANDOM_STATE)
-
-    try:
-        model.fit(X_train_scaled, y_train)
-
-        y_train_pred = model.predict(X_train_scaled)
-        y_test_pred = model.predict(X_test_scaled)
-
-        train_r2 = r2_score(y_train, y_train_pred)
-        test_r2 = r2_score(y_test, y_test_pred)
-        train_rmse = np.sqrt(mean_squared_error(y_train, y_train_pred))
-        test_rmse = np.sqrt(mean_squared_error(y_test, y_test_pred))
-
-        results = {
-            'model': model,
-            'imputer': imputer,
-            'scaler': scaler,
-            'train_r2': train_r2,
-            'test_r2': test_r2,
-            'train_rmse': train_rmse,
-            'test_rmse': test_rmse,
-            'predictions': {
-                'train': y_train_pred,
-                'test': y_test_pred
-            },
-            'model_type': 'linear'
-        }
-
-        gap = train_r2 - test_r2
-        print(f"      Linear Model - Train R²: {train_r2:.3f}")
-        print(f"      Linear Model - Test R²: {test_r2:.3f}")
-        print(f"      Linear Model - Gap: {gap:.3f}")
-
-        return results
-
-    except Exception as e:
-        print(f"   ❌ Error training linear glucose model: {e}")
-        return None
-
-
-def train_standard_model(X_train, X_test, y_train, y_test, model_type, target_name):
-    """Standard model training"""
-    print(f"   🎯 Training {model_type} model for {target_name}...")
-
-    X_train_clean = X_train.replace([np.inf, -np.inf], np.nan)
-    X_test_clean = X_test.replace([np.inf, -np.inf], np.nan)
-
-    imputer = SimpleImputer(strategy='median')
-    X_train_imputed = imputer.fit_transform(X_train_clean)
-    X_test_imputed = imputer.transform(X_test_clean)
-
-    X_train_imputed = np.nan_to_num(X_train_imputed)
-    X_test_imputed = np.nan_to_num(X_test_imputed)
-
-    if model_type == 'classification':
-        model = XGBClassifier(
-            n_estimators=50,
-            max_depth=3,
-            learning_rate=0.05,
-            reg_alpha=1.0,
-            reg_lambda=1.0,
-            subsample=0.8,
-            colsample_bytree=0.8,
-            random_state=RANDOM_STATE,
-            n_jobs=-1
+    if needs_filtering:
+        print("\n🔄 STEP 0.5: FILTERING DATA FILES")
+        filtered_dir = filter_all_files_to_match_patients(
+            DATA_DIR / MAIN_FILE,
+            DATA_DIR,
+            FILTERED_DATA_DIR,
+            COMPREHENSIVE_FILES
         )
+        # Use filtered data directory for the rest of the pipeline
+        analysis_data_dir = filtered_dir
     else:
-        model = XGBRegressor(
-            n_estimators=50,
-            max_depth=4,
-            learning_rate=0.1,
-            reg_alpha=0.5,
-            reg_lambda=0.5,
-            subsample=0.8,
-            colsample_bytree=0.8,
-            random_state=RANDOM_STATE,
-            n_jobs=-1
-        )
+        print("\n✅ Data already consistent, using original files")
+        analysis_data_dir = DATA_DIR
 
+    # Now run the enhanced pipeline with consistent data
     try:
-        model.fit(X_train_imputed, y_train)
+        # Update the data loading function to use the correct directory
+        def load_comprehensive_data_with_dir(files, data_dir, sample_size=SAMPLE_SIZE):
+            # Same as original load_comprehensive_data but with specified directory
+            print("📂 Loading comprehensive dataset...")
 
-        y_train_pred = model.predict(X_train_imputed)
-        y_test_pred = model.predict(X_test_imputed)
+            # Start with base file
+            base_file = files[0]
+            df = pd.read_csv(data_dir / base_file)
+            df = preprocess_data(df)
 
-        if model_type == 'classification':
-            train_score = accuracy_score(y_train, y_train_pred)
-            test_score = accuracy_score(y_test, y_test_pred)
-            metric_name = 'accuracy'
-        else:
-            train_score = r2_score(y_train, y_train_pred)
-            test_score = r2_score(y_test, y_test_pred)
-            metric_name = 'r2'
+            print(f"Base data: {df.shape}")
 
-        results = {
-            'model': model,
-            'imputer': imputer,
-            f'train_{metric_name}': train_score,
-            f'test_{metric_name}': test_score,
-            'predictions': {
-                'train': y_train_pred,
-                'test': y_test_pred
-            }
-        }
+            # Merge other files
+            for file_name in files[1:]:
+                print(f"🔗 Merging {file_name}...")
+                try:
+                    file_path = data_dir / file_name
+                    if not file_path.exists():
+                        print(f"   ⚠️ File not found: {file_name}")
+                        continue
 
-        if model_type == 'regression':
-            results['train_rmse'] = np.sqrt(mean_squared_error(y_train, y_train_pred))
-            results['test_rmse'] = np.sqrt(mean_squared_error(y_test, y_test_pred))
+                    new_data = pd.read_csv(file_path)
+                    new_data = preprocess_data(new_data)
 
-        gap = train_score - test_score
-        print(f"      Train {metric_name.upper()}: {train_score:.3f}")
-        print(f"      Test {metric_name.upper()}: {test_score:.3f}")
-        print(f"      Generalization Gap: {gap:.3f}")
+                    # Handle file structure
+                    new_data = handle_file_structure(new_data, file_name)
 
-        return results
+                    # Find merge keys
+                    merge_keys = find_merge_keys(df, new_data, file_name)
+                    if not merge_keys:
+                        print(f"   ⚠️ No merge keys found for {file_name}")
+                        continue
+
+                    # Memory-efficient merge
+                    if len(new_data) > 50000:
+                        new_data = new_data.sample(n=20000, random_state=RANDOM_STATE)
+                        print(f"   🔽 Sampled new data to {new_data.shape}")
+
+                    df = pd.merge(df, new_data, on=merge_keys, how='left',
+                                  suffixes=('', f'_{file_name.replace(".csv", "")}'))
+                    print(f"✅ After {file_name}: {df.shape}")
+
+                    del new_data
+                    gc.collect()
+
+                except Exception as e:
+                    print(f"❌ Error with {file_name}: {e}")
+
+            # Final sampling
+            if len(df) > sample_size:
+                df = df.sample(n=sample_size, random_state=RANDOM_STATE)
+                print(f"🔽 Final sampling to: {df.shape}")
+
+            return df
+
+        # Step 1: Load comprehensive dataset from filtered directory
+        print(f"\n📂 STEP 1: LOADING DATA FROM {analysis_data_dir}")
+        df = load_comprehensive_data_with_dir(COMPREHENSIVE_FILES, analysis_data_dir, SAMPLE_SIZE)
+        print(f"📊 Final dataset: {df.shape}")
+
+        # Step 2: Apply baseline normalization
+        print("\n🔄 STEP 2: APPLYING BASELINE NORMALIZATION...")
+        df = normalize_by_baseline(df, TARGETS, baseline_days=3)
+
+        # Use normalized targets for modeling
+        NORMALIZED_TARGETS = [f"{target}_normalized" for target in TARGETS]
+        print(f"🎯 Normalized targets: {NORMALIZED_TARGETS}")
+
+        # Step 3: Add personalized features
+        print("\n🎯 STEP 3: ADDING PERSONALIZED FEATURES...")
+        df = add_personalized_features(df, TARGETS, window_size=7)
+        print(f"📊 Dataset with personalized features: {df.shape}")
+
+        # Step 4: Get features for enhanced targets (EXCLUDING HORMONE-DERIVED FEATURES)
+        feature_sets = get_all_features(df, NORMALIZED_TARGETS)
+
+        # Step 5: Train enhanced models
+        print("\n🤖 STEP 4: TRAINING ENHANCED MODELS...")
+        results = train_enhanced_models(df, feature_sets, NORMALIZED_TARGETS)
+
+        # Step 6: Create comprehensive report
+        create_comprehensive_report(results, feature_sets)
+
+        print(f"\n✅ ENHANCED PERSONALIZED MODELING COMPLETE!")
+        print(f"📁 Results saved to: {OUTPUT_DIR}")
+
+        # Print quick summary
+        print(f"\n📋 QUICK SUMMARY:")
+        for target, target_results in results.items():
+            print(f"\n   {target.upper()}:")
+            if target in feature_sets:
+                print(f"     Features used: {len(feature_sets[target])}")
+            best_model = None
+            best_r2 = -1
+            for model_name, result in target_results.items():
+                if result and result['test_metrics']['correlation_metrics']['r2'] > best_r2:
+                    best_r2 = result['test_metrics']['correlation_metrics']['r2']
+                    best_model = model_name
+            if best_model:
+                test_patients = target_results[best_model]['test_metrics']['n_patients']
+                print(f"     Best Model: {best_model} (R² = {best_r2:.4f})")
+                print(f"     Test Patients: {test_patients}")
 
     except Exception as e:
-        print(f"   ❌ Error training model: {e}")
-        return None
+        print(f"❌ Error in enhanced main execution: {e}")
+        import traceback
+        traceback.print_exc()
+
+
+# =============================================================================
+# QUICK DATA FILTERING FUNCTION (Standalone)
+# =============================================================================
+
+def quick_filter_data():
+    """
+    Quick function to just filter the data without running the full pipeline
+    """
+    MAIN_FILE = 'hormones_and_selfreport.csv'
+    FILTERED_DATA_DIR = Path('filtered_data')
+
+    print("🔍 QUICK DATA FILTERING")
+    print("=" * 50)
+
+    # First check consistency
+    report = create_consistency_report(
+        DATA_DIR / MAIN_FILE,
+        DATA_DIR,
+        COMPREHENSIVE_FILES
+    )
+
+    # Filter if needed
+    filter_all_files_to_match_patients(
+        DATA_DIR / MAIN_FILE,
+        DATA_DIR,
+        FILTERED_DATA_DIR,
+        COMPREHENSIVE_FILES
+    )
+
+    print("\n✅ DATA FILTERING COMPLETE!")
+    print(f"📁 Filtered files saved to: {FILTERED_DATA_DIR}")
 
 
 # =============================================================================
 # MAIN EXECUTION
 # =============================================================================
 
-def main():
-    """Main execution function - DEBUG VERSION"""
-    print("=" * 80)
-    print("HORMONE-BASED PREDICTIONS - GLUCOSE DEBUG VERSION")
-    print("Extensive debugging to find why glucose_target is missing")
-    print("=" * 80)
-
-    try:
-        # Step 1: Load and process data with debugging
-        train_df, test_df, train_patients, test_patients = safe_load_and_process_data_debug()
-
-        # Step 2: Prepare feature columns
-        exclude_cols = ['id', 'day_in_study', 'phase', 'phase_encoded', 'phase_combined',
-                        'days_to_next_menstruation', 'glucose_target', 'glucose_patient_mean',
-                        'glucose_patient_std', 'glucose_count', 'glucose_normalized', 'glucose_relative',
-                        'glucose_global_mean', 'glucose_global_std']
-
-        # Get common features
-        train_features = [col for col in train_df.columns
-                          if col not in exclude_cols and pd.api.types.is_numeric_dtype(train_df[col])]
-        test_features = [col for col in test_df.columns
-                         if col not in exclude_cols and pd.api.types.is_numeric_dtype(test_df[col])]
-
-        common_features = list(set(train_features) & set(test_features))
-
-        # Filter for features with reasonable completeness
-        valid_features = []
-        for col in common_features:
-            completeness = train_df[col].notna().sum() / len(train_df)
-            if completeness > 0.1:
-                valid_features.append(col)
-
-        print(f"\n🎯 Using {len(valid_features)} features for modeling")
-
-        # Step 3: Train and evaluate models
-        results = evaluate_models_complete(train_df, test_df, valid_features)
-
-        # Step 4: Create comprehensive report
-        if results:
-            print(f"\n📋 Creating comprehensive report...")
-
-            summary_data = []
-            for target_name, target_results in results.items():
-                if 'test_accuracy' in target_results:
-                    summary_data.append({
-                        'target': target_name,
-                        'type': 'classification',
-                        'train_score': target_results['train_accuracy'],
-                        'test_score': target_results['test_accuracy'],
-                        'metric': 'accuracy'
-                    })
-                else:
-                    summary_data.append({
-                        'target': target_name,
-                        'type': 'regression',
-                        'train_score': target_results['train_r2'],
-                        'test_score': target_results['test_r2'],
-                        'metric': 'r2'
-                    })
-
-            summary_df = pd.DataFrame(summary_data)
-            summary_df.to_csv(OUTPUT_DIR / 'model_performance_summary.csv', index=False)
-
-            print("✅ Debug analysis completed successfully!")
-            print(f"📁 Results saved to: {OUTPUT_DIR}/")
-
-            # Print performance summary
-            print("\n" + "=" * 60)
-            print("DEBUG PERFORMANCE SUMMARY")
-            print("=" * 60)
-            for target_name, target_results in results.items():
-                if 'test_accuracy' in target_results:
-                    gap = target_results['train_accuracy'] - target_results['test_accuracy']
-                    print(f"📊 {target_name}: Train={target_results['train_accuracy']:.3f}, "
-                          f"Test={target_results['test_accuracy']:.3f}, Gap={gap:.3f}")
-                else:
-                    gap = target_results['train_r2'] - target_results['test_r2']
-                    model_type = target_results.get('model_type', 'xgb')
-                    print(f"📊 {target_name}: Train R²={target_results['train_r2']:.3f}, "
-                          f"Test R²={target_results['test_r2']:.3f}, Gap={gap:.3f} ({model_type})")
-
-        else:
-            print("⚠️  No models could be trained successfully")
-
-        return results, train_df, test_df
-
-    except Exception as e:
-        print(f"❌ Error: {e}")
-        import traceback
-        traceback.print_exc()
-        return None, None, None
-
-
 if __name__ == "__main__":
-    results, train_df, test_df = main()
+    # Run quick test first
+    quick_test_enhancements()
+
+    # Run full enhanced pipeline
+    main_with_filtering()

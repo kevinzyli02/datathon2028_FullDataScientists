@@ -412,12 +412,12 @@ class SimpleMixedEffects(BaseEstimator, RegressorMixin):
 
 
 # =============================================================================
-# EFFICIENT DATA LOADING
+# MEMORY-EFFICIENT DATA LOADING
 # =============================================================================
 
-def load_comprehensive_data(files, data_dir, sample_size=SAMPLE_SIZE):
-    """Load and merge comprehensive dataset efficiently"""
-    print("📂 Loading comprehensive dataset...")
+def load_comprehensive_data_memory_efficient(files, data_dir, sample_size=SAMPLE_SIZE):
+    """Load and merge comprehensive dataset with memory efficiency"""
+    print("📂 Loading comprehensive dataset (Memory Efficient)...")
 
     # Start with base file
     base_file = files[0]
@@ -426,7 +426,7 @@ def load_comprehensive_data(files, data_dir, sample_size=SAMPLE_SIZE):
 
     print(f"Base data: {df.shape}")
 
-    # Merge other files
+    # Process files in chunks and merge strategically
     for file_name in files[1:]:
         print(f"🔗 Merging {file_name}...")
         try:
@@ -435,10 +435,9 @@ def load_comprehensive_data(files, data_dir, sample_size=SAMPLE_SIZE):
                 print(f"   ⚠️ File not found: {file_name}")
                 continue
 
+            # Read only necessary columns to save memory
             new_data = pd.read_csv(file_path)
             new_data = preprocess_data(new_data)
-
-            # Handle file structure
             new_data = handle_file_structure(new_data, file_name)
 
             # Find merge keys
@@ -447,25 +446,51 @@ def load_comprehensive_data(files, data_dir, sample_size=SAMPLE_SIZE):
                 print(f"   ⚠️ No merge keys found for {file_name}")
                 continue
 
-            # Memory-efficient merge
-            if len(new_data) > 50000:
-                new_data = new_data.sample(n=20000, random_state=RANDOM_STATE)
+            # For very large files, use more aggressive sampling
+            if len(new_data) > 100000:
+                print(f"   🔽 Large file detected ({len(new_data)} rows), sampling...")
+                # Sample but preserve patient distribution
+                patient_sample = new_data['id'].value_counts().head(1000).index
+                new_data = new_data[new_data['id'].isin(patient_sample)]
+                if len(new_data) > 50000:
+                    new_data = new_data.sample(n=10000, random_state=RANDOM_STATE)
                 print(f"   🔽 Sampled new data to {new_data.shape}")
 
-            df = pd.merge(df, new_data, on=merge_keys, how='left',
+            # Memory-efficient merge by selecting only numeric columns for merging
+            numeric_cols = new_data.select_dtypes(include=[np.number]).columns.tolist()
+            if 'id' in new_data.columns and 'id' not in numeric_cols:
+                numeric_cols.append('id')
+            if 'day_in_study' in new_data.columns and 'day_in_study' not in numeric_cols:
+                numeric_cols.append('day_in_study')
+
+            new_data_reduced = new_data[numeric_cols] if numeric_cols else new_data
+
+            # Perform merge
+            df = pd.merge(df, new_data_reduced, on=merge_keys, how='left',
                           suffixes=('', f'_{file_name.replace(".csv", "")}'))
             print(f"✅ After {file_name}: {df.shape}")
 
-            del new_data
+            # Force garbage collection
+            del new_data, new_data_reduced
             gc.collect()
 
         except Exception as e:
             print(f"❌ Error with {file_name}: {e}")
 
-    # Final sampling
+    # Final sampling with memory optimization
     if len(df) > sample_size:
-        df = df.sample(n=sample_size, random_state=RANDOM_STATE)
-        print(f"🔽 Final sampling to: {df.shape}")
+        print(f"🔽 Final sampling from {len(df)} to {sample_size}...")
+        # Sample by patients to maintain distribution
+        unique_patients = df['id'].unique()
+        n_patient_sample = int(len(unique_patients) * 0.8)  # Keep 80% of patients
+        patient_sample = np.random.choice(unique_patients, size=n_patient_sample, replace=False)
+        df = df[df['id'].isin(patient_sample)]
+
+        # If still too large, sample further
+        if len(df) > sample_size:
+            df = df.sample(n=sample_size, random_state=RANDOM_STATE)
+
+        print(f"🔽 Final dataset: {df.shape}")
 
     return df
 
@@ -488,28 +513,33 @@ def handle_file_structure(df, file_name):
     # For high-frequency files, aggregate by participant to reduce size
     if file_name in ['glucose.csv', 'wrist_temperature.csv']:
         print(f"   📊 Aggregating {file_name} by participant...")
-        df = aggregate_by_participant(df)
+        df = aggregate_by_participant_memory_efficient(df)
 
     return df
 
 
-def aggregate_by_participant(df):
-    """Aggregate high-frequency data by participant to reduce size"""
+def aggregate_by_participant_memory_efficient(df):
+    """Aggregate high-frequency data by participant with memory optimization"""
     if 'id' not in df.columns:
         return df
 
+    # Select only numeric columns to save memory
     numeric_cols = df.select_dtypes(include=[np.number]).columns.tolist()
-    numeric_cols = [col for col in numeric_cols if col != 'id']
+    if 'id' not in numeric_cols and 'id' in df.columns:
+        numeric_cols.append('id')
 
-    if numeric_cols:
-        # Aggregate statistics by participant
-        aggregated = df.groupby('id')[numeric_cols].agg(['mean', 'std', 'min', 'max']).reset_index()
-        # Flatten column names
-        aggregated.columns = [f'{col[0]}_{col[1]}' if col[1] else col[0] for col in aggregated.columns]
-        print(f"   ✅ Aggregated to {aggregated.shape}")
-        return aggregated
+    df_reduced = df[numeric_cols]
 
-    return df
+    # Aggregate statistics by participant
+    aggregated = df_reduced.groupby('id').agg(['mean', 'std', 'min', 'max']).reset_index()
+    # Flatten column names
+    aggregated.columns = [f'{col[0]}_{col[1]}' if col[1] else col[0] for col in aggregated.columns]
+    print(f"   ✅ Aggregated to {aggregated.shape}")
+
+    del df_reduced
+    gc.collect()
+
+    return aggregated
 
 
 def find_merge_keys(base_df, new_df, file_name):
@@ -851,18 +881,18 @@ def create_regression_diagnostics(y_true, y_pred, model_name, target_name, n_fea
 
 
 # =============================================================================
-# ENHANCED MODEL TRAINING WITH ALL IMPROVEMENTS
+# CONSISTENT MODEL TRAINING WITH FIXED SPLITS
 # =============================================================================
 
-def train_enhanced_models(df, feature_sets, targets, train_patients, test_patients):
-    """Enhanced training function with Mixed Effects Ensemble and personalization support"""
+def train_enhanced_models_consistent_splits(df, feature_sets, targets):
+    """Enhanced training function with consistent splits across all models"""
 
-    print("\n🚀 TRAINING ENHANCED MODELS WITH PERSONALIZATION")
+    print("\n🚀 TRAINING ENHANCED MODELS WITH CONSISTENT SPLITS")
     print("=" * 80)
 
     all_results = {}
 
-    # Define enhanced models (including Mixed Effects)
+    # Define enhanced models
     models = {
         'RandomForest': RandomForestRegressor(
             n_estimators=100, max_depth=10, random_state=RANDOM_STATE, n_jobs=-1
@@ -876,7 +906,6 @@ def train_enhanced_models(df, feature_sets, targets, train_patients, test_patien
             random_state=RANDOM_STATE, n_jobs=-1, verbose=-1
         ),
         'MixedEffects': SimpleMixedEffects(min_patient_samples=5),
-
     }
 
     for target in targets:
@@ -892,32 +921,18 @@ def train_enhanced_models(df, feature_sets, targets, train_patients, test_patien
             print("❌ No features available for this target")
             continue
 
-        # Prepare target-specific data using global patient split
-        target_df = df.dropna(subset=[target]).copy()
-        print(f"📊 Dataset for {target} after dropna: {target_df.shape}")
+        # Prepare data
+        target_data = df.dropna(subset=[target]).copy()
 
-        train_mask = target_df['id'].isin(train_patients)
-        test_mask = target_df['id'].isin(test_patients)
+        print(f"📊 Dataset before split: {target_data.shape}")
+        print(f"🎯 Using {len(all_features)} features")
 
-        train_data = target_df[train_mask]
-        test_data = target_df[test_mask]
+        # PATIENT-WISE 80/20 Split (ONCE per target)
+        train_data, test_data, train_patients, test_patients = patient_wise_train_test_split(
+            target_data, test_size=TEST_SIZE, random_state=RANDOM_STATE
+        )
 
-        effective_train_patients = train_data['id'].unique()
-        effective_test_patients = test_data['id'].unique()
-
-        print(f"🔀 Using global split for {target}:")
-        print(f"   Assigned training patients: {len(train_patients)}")
-        print(f"   Assigned testing patients: {len(test_patients)}")
-        print(f"   Effective training patients (with non-NaN target): {len(effective_train_patients)}")
-        print(f"   Effective testing patients (with non-NaN target): {len(effective_test_patients)}")
-        print(f"   Training records: {len(train_data)}")
-        print(f"   Testing records: {len(test_data)}")
-
-        if len(test_data) == 0 or len(train_data) == 0:
-            print(f"❌ Insufficient data for {target} after applying split")
-            continue
-
-        # Prepare features and targets
+        # Prepare features and targets (ONCE per target)
         X_train = train_data[all_features].copy()
         y_train = train_data[target].values
         X_test = test_data[all_features].copy()
@@ -927,17 +942,21 @@ def train_enhanced_models(df, feature_sets, targets, train_patients, test_patien
         train_patient_ids = train_data['id'].values
         test_patient_ids = test_data['id'].values
 
-        print(f"🎯 Using {len(all_features)} features")
+        print(f"🔀 Final split:")
+        print(f"   Training: {X_train.shape} ({len(train_patients)} patients)")
+        print(f"   Testing:  {X_test.shape} ({len(test_patients)} patients)")
 
-        # Handle missing values
+        # Handle missing values (ONCE per target)
         imputer = SimpleImputer(strategy='median')
         X_train_imputed = imputer.fit_transform(X_train)
         X_test_imputed = imputer.transform(X_test)
 
-        # Scale features
+        # Scale features (ONCE per target)
         scaler = StandardScaler()
         X_train_scaled = scaler.fit_transform(X_train_imputed)
         X_test_scaled = scaler.transform(X_test_imputed)
+
+        print(f"✅ Prepared consistent training data for all models")
 
         target_results = {}
 
@@ -970,14 +989,14 @@ def train_enhanced_models(df, feature_sets, targets, train_patients, test_patien
                 # Calculate comprehensive metrics
                 train_metrics = calculate_comprehensive_metrics(y_train, y_pred_train,
                                                                 f"{model_name} (Train)", target,
-                                                                len(all_features), len(effective_train_patients))
+                                                                len(all_features), len(train_patients))
                 test_metrics = calculate_comprehensive_metrics(y_test, y_pred_test,
                                                                f"{model_name} (Test)", target,
-                                                               len(all_features), len(effective_test_patients))
+                                                               len(all_features), len(test_patients))
 
                 # Create diagnostic plots
                 create_regression_diagnostics(y_test, y_pred_test, model_name, target,
-                                              len(all_features), len(effective_test_patients))
+                                              len(all_features), len(test_patients))
 
                 # Store results
                 target_results[model_name] = {
@@ -985,8 +1004,8 @@ def train_enhanced_models(df, feature_sets, targets, train_patients, test_patien
                     'train_metrics': train_metrics,
                     'test_metrics': test_metrics,
                     'features_used': all_features,
-                    'train_patients': effective_train_patients,
-                    'test_patients': effective_test_patients,
+                    'train_patients': train_patients,
+                    'test_patients': test_patients,
                     'model': model
                 }
 
@@ -998,8 +1017,9 @@ def train_enhanced_models(df, feature_sets, targets, train_patients, test_patien
 
         all_results[target] = target_results
 
-        # Clean memory
+        # Clean memory after each target
         del X_train, X_test, y_train, y_test, X_train_scaled, X_test_scaled
+        del train_data, test_data
         gc.collect()
 
     return all_results
@@ -1164,13 +1184,12 @@ def create_performance_comparison_plot(results):
 # QUICK TEST FUNCTION
 # =============================================================================
 
-
 def quick_test_enhancements():
     """Quick test to verify enhancements work"""
     print("🧪 QUICK TEST OF ENHANCEMENTS")
 
     # Load small sample
-    df = load_comprehensive_data(COMPREHENSIVE_FILES[:3], DATA_DIR, sample_size=1000)
+    df = load_comprehensive_data_memory_efficient(COMPREHENSIVE_FILES[:3], DATA_DIR, sample_size=1000)
 
     # Test baseline normalization
     df_normalized = normalize_by_baseline(df, TARGETS[:1])
@@ -1226,13 +1245,13 @@ def quick_test_enhancements():
 
 
 # =============================================================================
-# UPDATED MAIN EXECUTION WITH DATA FILTERING
+# UPDATED MAIN EXECUTION WITH MEMORY EFFICIENCY
 # =============================================================================
 
-def main_with_filtering():
-    """Enhanced main function with data filtering"""
+def main_with_filtering_memory_efficient():
+    """Enhanced main function with memory-efficient data filtering and processing"""
 
-    print("🚀 ENHANCED PIPELINE WITH DATA FILTERING")
+    print("🚀 ENHANCED PIPELINE WITH MEMORY-EFFICIENT PROCESSING")
     print("=" * 80)
 
     # Define paths
@@ -1267,67 +1286,15 @@ def main_with_filtering():
         print("\n✅ Data already consistent, using original files")
         analysis_data_dir = DATA_DIR
 
-    # Now run the enhanced pipeline with consistent data
+    # Now run the enhanced pipeline with consistent data and memory efficiency
     try:
-        # Update the data loading function to use the correct directory
-        def load_comprehensive_data_with_dir(files, data_dir, sample_size=SAMPLE_SIZE):
-            # Same as original load_comprehensive_data but with specified directory
-            print("📂 Loading comprehensive dataset...")
-
-            # Start with base file
-            base_file = files[0]
-            df = pd.read_csv(data_dir / base_file)
-            df = preprocess_data(df)
-
-            print(f"Base data: {df.shape}")
-
-            # Merge other files
-            for file_name in files[1:]:
-                print(f"🔗 Merging {file_name}...")
-                try:
-                    file_path = data_dir / file_name
-                    if not file_path.exists():
-                        print(f"   ⚠️ File not found: {file_name}")
-                        continue
-
-                    new_data = pd.read_csv(file_path)
-                    new_data = preprocess_data(new_data)
-
-                    # Handle file structure
-                    new_data = handle_file_structure(new_data, file_name)
-
-                    # Find merge keys
-                    merge_keys = find_merge_keys(df, new_data, file_name)
-                    if not merge_keys:
-                        print(f"   ⚠️ No merge keys found for {file_name}")
-                        continue
-
-                    # Memory-efficient merge
-                    if len(new_data) > 50000:
-                        new_data = new_data.sample(n=20000, random_state=RANDOM_STATE)
-                        print(f"   🔽 Sampled new data to {new_data.shape}")
-
-                    df = pd.merge(df, new_data, on=merge_keys, how='left',
-                                  suffixes=('', f'_{file_name.replace(".csv", "")}'))
-                    print(f"✅ After {file_name}: {df.shape}")
-
-                    del new_data
-                    gc.collect()
-
-                except Exception as e:
-                    print(f"❌ Error with {file_name}: {e}")
-
-            # Final sampling
-            if len(df) > sample_size:
-                df = df.sample(n=sample_size, random_state=RANDOM_STATE)
-                print(f"🔽 Final sampling to: {df.shape}")
-
-            return df
-
-        # Step 1: Load comprehensive dataset from filtered directory
-        print(f"\n📂 STEP 1: LOADING DATA FROM {analysis_data_dir}")
-        df = load_comprehensive_data_with_dir(COMPREHENSIVE_FILES, analysis_data_dir, SAMPLE_SIZE)
+        # Step 1: Load comprehensive dataset from filtered directory with memory efficiency
+        print(f"\n📂 STEP 1: LOADING DATA FROM {analysis_data_dir} (Memory Efficient)")
+        df = load_comprehensive_data_memory_efficient(COMPREHENSIVE_FILES, analysis_data_dir, SAMPLE_SIZE)
         print(f"📊 Final dataset: {df.shape}")
+
+        # Force garbage collection after loading
+        gc.collect()
 
         # Step 2: Apply baseline normalization
         print("\n🔄 STEP 2: APPLYING BASELINE NORMALIZATION...")
@@ -1342,18 +1309,15 @@ def main_with_filtering():
         df = add_personalized_features(df, TARGETS, window_size=7)
         print(f"📊 Dataset with personalized features: {df.shape}")
 
-        # Step 3.5: Perform global patient-wise split
-        print("\n🔀 STEP 3.5: PERFORMING GLOBAL PATIENT-WISE SPLIT...")
-        _, _, train_patients, test_patients = patient_wise_train_test_split(
-            df, test_size=TEST_SIZE, random_state=RANDOM_STATE
-        )
+        # Clean memory
+        gc.collect()
 
         # Step 4: Get features for enhanced targets (EXCLUDING HORMONE-DERIVED FEATURES)
         feature_sets = get_all_features(df, NORMALIZED_TARGETS)
 
-        # Step 5: Train enhanced models
-        print("\n🤖 STEP 4: TRAINING ENHANCED MODELS...")
-        results = train_enhanced_models(df, feature_sets, NORMALIZED_TARGETS, train_patients, test_patients)
+        # Step 5: Train enhanced models with CONSISTENT splits
+        print("\n🤖 STEP 4: TRAINING ENHANCED MODELS WITH CONSISTENT SPLITS...")
+        results = train_enhanced_models_consistent_splits(df, feature_sets, NORMALIZED_TARGETS)
 
         # Step 6: Create comprehensive report
         create_comprehensive_report(results, feature_sets)
@@ -1382,6 +1346,29 @@ def main_with_filtering():
         print(f"❌ Error in enhanced main execution: {e}")
         import traceback
         traceback.print_exc()
+        # Try to free memory and continue with smaller dataset
+        gc.collect()
+        print("🔄 Attempting to continue with smaller dataset...")
+
+        # Fallback: use smaller sample size
+        try:
+            SAMPLE_SIZE_FALLBACK = 5000
+            print(f"🔄 Using smaller sample size: {SAMPLE_SIZE_FALLBACK}")
+            df = load_comprehensive_data_memory_efficient(COMPREHENSIVE_FILES[:5], analysis_data_dir,
+                                                          SAMPLE_SIZE_FALLBACK)
+
+            # Continue with smaller dataset...
+            print("🔄 Continuing with smaller dataset...")
+            # Apply the same steps as above but with smaller dataset
+            df = normalize_by_baseline(df, TARGETS, baseline_days=3)
+            NORMALIZED_TARGETS = [f"{target}_normalized" for target in TARGETS]
+            df = add_personalized_features(df, TARGETS, window_size=7)
+            feature_sets = get_all_features(df, NORMALIZED_TARGETS)
+            results = train_enhanced_models_consistent_splits(df, feature_sets, NORMALIZED_TARGETS)
+            create_comprehensive_report(results, feature_sets)
+
+        except Exception as e2:
+            print(f"❌ Fallback also failed: {e2}")
 
 
 # =============================================================================
@@ -1425,5 +1412,5 @@ if __name__ == "__main__":
     # Run quick test first
     quick_test_enhancements()
 
-    # Run full enhanced pipeline
-    main_with_filtering()
+    # Run full enhanced pipeline with memory efficiency
+    main_with_filtering_memory_efficient()
