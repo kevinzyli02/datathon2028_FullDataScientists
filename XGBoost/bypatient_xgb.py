@@ -854,7 +854,7 @@ def create_regression_diagnostics(y_true, y_pred, model_name, target_name, n_fea
 # ENHANCED MODEL TRAINING WITH ALL IMPROVEMENTS
 # =============================================================================
 
-def train_enhanced_models(df, feature_sets, targets):
+def train_enhanced_models(df, feature_sets, targets, train_patients, test_patients):
     """Enhanced training function with Mixed Effects Ensemble and personalization support"""
 
     print("\n🚀 TRAINING ENHANCED MODELS WITH PERSONALIZATION")
@@ -892,16 +892,30 @@ def train_enhanced_models(df, feature_sets, targets):
             print("❌ No features available for this target")
             continue
 
-        # Prepare data
-        target_data = df.dropna(subset=[target]).copy()
+        # Prepare target-specific data using global patient split
+        target_df = df.dropna(subset=[target]).copy()
+        print(f"📊 Dataset for {target} after dropna: {target_df.shape}")
 
-        print(f"📊 Dataset before split: {target_data.shape}")
-        print(f"🎯 Using {len(all_features)} features")
+        train_mask = target_df['id'].isin(train_patients)
+        test_mask = target_df['id'].isin(test_patients)
 
-        # PATIENT-WISE 80/20 Split
-        train_data, test_data, train_patients, test_patients = patient_wise_train_test_split(
-            target_data, test_size=TEST_SIZE, random_state=RANDOM_STATE
-        )
+        train_data = target_df[train_mask]
+        test_data = target_df[test_mask]
+
+        effective_train_patients = train_data['id'].unique()
+        effective_test_patients = test_data['id'].unique()
+
+        print(f"🔀 Using global split for {target}:")
+        print(f"   Assigned training patients: {len(train_patients)}")
+        print(f"   Assigned testing patients: {len(test_patients)}")
+        print(f"   Effective training patients (with non-NaN target): {len(effective_train_patients)}")
+        print(f"   Effective testing patients (with non-NaN target): {len(effective_test_patients)}")
+        print(f"   Training records: {len(train_data)}")
+        print(f"   Testing records: {len(test_data)}")
+
+        if len(test_data) == 0 or len(train_data) == 0:
+            print(f"❌ Insufficient data for {target} after applying split")
+            continue
 
         # Prepare features and targets
         X_train = train_data[all_features].copy()
@@ -913,9 +927,7 @@ def train_enhanced_models(df, feature_sets, targets):
         train_patient_ids = train_data['id'].values
         test_patient_ids = test_data['id'].values
 
-        print(f"🔀 Final split:")
-        print(f"   Training: {X_train.shape} ({len(train_patients)} patients)")
-        print(f"   Testing:  {X_test.shape} ({len(test_patients)} patients)")
+        print(f"🎯 Using {len(all_features)} features")
 
         # Handle missing values
         imputer = SimpleImputer(strategy='median')
@@ -958,14 +970,14 @@ def train_enhanced_models(df, feature_sets, targets):
                 # Calculate comprehensive metrics
                 train_metrics = calculate_comprehensive_metrics(y_train, y_pred_train,
                                                                 f"{model_name} (Train)", target,
-                                                                len(all_features), len(train_patients))
+                                                                len(all_features), len(effective_train_patients))
                 test_metrics = calculate_comprehensive_metrics(y_test, y_pred_test,
                                                                f"{model_name} (Test)", target,
-                                                               len(all_features), len(test_patients))
+                                                               len(all_features), len(effective_test_patients))
 
                 # Create diagnostic plots
                 create_regression_diagnostics(y_test, y_pred_test, model_name, target,
-                                              len(all_features), len(test_patients))
+                                              len(all_features), len(effective_test_patients))
 
                 # Store results
                 target_results[model_name] = {
@@ -973,8 +985,8 @@ def train_enhanced_models(df, feature_sets, targets):
                     'train_metrics': train_metrics,
                     'test_metrics': test_metrics,
                     'features_used': all_features,
-                    'train_patients': train_patients,
-                    'test_patients': test_patients,
+                    'train_patients': effective_train_patients,
+                    'test_patients': effective_test_patients,
                     'model': model
                 }
 
@@ -1330,12 +1342,18 @@ def main_with_filtering():
         df = add_personalized_features(df, TARGETS, window_size=7)
         print(f"📊 Dataset with personalized features: {df.shape}")
 
+        # Step 3.5: Perform global patient-wise split
+        print("\n🔀 STEP 3.5: PERFORMING GLOBAL PATIENT-WISE SPLIT...")
+        _, _, train_patients, test_patients = patient_wise_train_test_split(
+            df, test_size=TEST_SIZE, random_state=RANDOM_STATE
+        )
+
         # Step 4: Get features for enhanced targets (EXCLUDING HORMONE-DERIVED FEATURES)
         feature_sets = get_all_features(df, NORMALIZED_TARGETS)
 
         # Step 5: Train enhanced models
         print("\n🤖 STEP 4: TRAINING ENHANCED MODELS...")
-        results = train_enhanced_models(df, feature_sets, NORMALIZED_TARGETS)
+        results = train_enhanced_models(df, feature_sets, NORMALIZED_TARGETS, train_patients, test_patients)
 
         # Step 6: Create comprehensive report
         create_comprehensive_report(results, feature_sets)

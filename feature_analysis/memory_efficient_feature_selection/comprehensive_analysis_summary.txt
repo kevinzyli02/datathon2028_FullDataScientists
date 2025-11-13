@@ -2,110 +2,110 @@ COMPREHENSIVE FEATURE SELECTION AND MODEL TESTING SUMMARY
 ======================================================================
 
 TARGET: LH
-Samples: 19,934
-Train/Test: 15,947/3,987
-Mean: 5.198, Std: 1.348
+Samples: 19,930
+Train/Test: 15,944/3,986
+Mean: 5.343, Std: 1.398
 
 MODEL PERFORMANCE:
   RandomForest:
-    R²:  0.9628
-    RMSE: 0.2479
-    MAE:  0.0217
-    Time: 0.15s
+    R²:  0.9208
+    RMSE: 0.3980
+    MAE:  0.0263
+    Time: 0.41s
   XGBoost:
-    R²:  0.9555
-    RMSE: 0.2710
-    MAE:  0.0188
-    Time: 0.13s
+    R²:  0.9303
+    RMSE: 0.3735
+    MAE:  0.0239
+    Time: 0.12s
   LightGBM:
-    R²:  0.9512
-    RMSE: 0.2839
-    MAE:  0.0310
-    Time: 0.06s
+    R²:  0.9253
+    RMSE: 0.3867
+    MAE:  0.0317
+    Time: 0.05s
 
 TOP 10 FEATURES:
-   1. composition_score
-   2. activeduration
-   3. weight_2022
-   4. duration_exercise
-   5. exertion_points
-   6. max_responsiveness_points
+   1. max_exertion_points
+   2. temperature_diff_from_baseline_min
+   3. responsiveness_points
+   4. stress_score
+   5. max_responsiveness_points
+   6. activitytypeid
    7. temperature_diff_from_baseline_max
-   8. duration_score
-   9. sleep_points
-  10. originalduration
+   8. weight_2022
+   9. overall_score
+  10. deep_sleep_in_minutes
 
 ======================================================================
 
 TARGET: ESTROGEN
-Samples: 19,934
-Train/Test: 15,947/3,987
-Mean: 51.601, Std: 25.919
+Samples: 19,930
+Train/Test: 15,944/3,986
+Mean: 51.581, Std: 24.932
 
 MODEL PERFORMANCE:
   RandomForest:
-    R²:  0.9814
-    RMSE: 3.4467
-    MAE:  0.2776
-    Time: 0.15s
+    R²:  0.9623
+    RMSE: 5.4390
+    MAE:  0.2068
+    Time: 0.14s
   XGBoost:
-    R²:  0.8544
-    RMSE: 9.6425
-    MAE:  0.4440
+    R²:  0.9624
+    RMSE: 5.4301
+    MAE:  0.2270
     Time: 0.04s
   LightGBM:
-    R²:  0.9297
-    RMSE: 6.6994
-    MAE:  0.5883
-    Time: 0.05s
+    R²:  0.9862
+    RMSE: 3.2941
+    MAE:  0.3057
+    Time: 0.04s
 
 TOP 10 FEATURES:
-   1. composition_score
-   2. is_weekend_resting_heart_rate
+   1. max_exertion_points
+   2. duration_score
    3. restlessness
-   4. last_modified_day_in_study
-   5. deep_sleep_in_minutes
-   6. max_responsiveness_points
-   7. duration_score
-   8. day_in_study_mean_wrist_temperature
-   9. revitalization_score
-  10. study_interval_mean_wrist_temperature
+   4. revitalization_score
+   5. temperature_diff_from_baseline_min
+   6. responsiveness_points
+   7. max_responsiveness_points
+   8. is_weekend_resting_heart_rate
+   9. weight_2022
+  10. deep_sleep_in_minutes
 
 ======================================================================
 
 TARGET: PDG
-Samples: 19,929
-Train/Test: 15,943/3,986
-Mean: 1.820, Std: 1.687
+Samples: 19,915
+Train/Test: 15,932/3,983
+Mean: 1.807, Std: 1.370
 
 MODEL PERFORMANCE:
   RandomForest:
-    R²:  0.8595
-    RMSE: 0.6111
-    MAE:  0.0341
-    Time: 0.15s
+    R²:  0.9140
+    RMSE: 0.3548
+    MAE:  0.0190
+    Time: 0.16s
   XGBoost:
-    R²:  0.8315
-    RMSE: 0.6693
-    MAE:  0.0329
-    Time: 0.04s
+    R²:  0.9441
+    RMSE: 0.2859
+    MAE:  0.0151
+    Time: 0.05s
   LightGBM:
-    R²:  0.8510
-    RMSE: 0.6294
-    MAE:  0.0436
-    Time: 0.04s
+    R²:  0.9407
+    RMSE: 0.2946
+    MAE:  0.0227
+    Time: 0.05s
 
 TOP 10 FEATURES:
-   1. composition_score
-   2. is_weekend_resting_heart_rate
-   3. activitytypeid
-   4. last_modified_day_in_study
-   5. restlessness
-   6. deep_sleep_in_minutes
-   7. day_in_study_std_wrist_temperature
-   8. duration_score
-   9. sleep_end_day_in_study_computed_temperature
-  10. revitalization_score
+   1. resting_heart_rate
+   2. restlessness
+   3. day_in_study_std_wrist_temperature
+   4. revitalization_score
+   5. last_modified_day_in_study
+   6. temperature_diff_from_baseline_min
+   7. original_start_day_in_study
+   8. is_weekend_resting_heart_rate
+   9. deep_sleep_in_minutes
+  10. composition_score
 
 ======================================================================
 
