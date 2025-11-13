@@ -1,27 +1,9 @@
 # datathon2028_FullDataScientists
 
-To Use: 
+pls_analysis: includes Partial Least Squares (PLS) regression used to assess linear correlations between variables
 
-Download virtual environment using command prompt:
+feature_analysis: measure the variables with the highest contribution to the model
 
-cd /__insert file location__
+XGBoost: folder with all scripts and analysis of RF/XGBoost/LightGBM models. 
 
-then use the folloiwng prompt to install the necessary packages
-
-python -m venv .venv
-# macOS/Linux
-source .venv/bin/activate
-# Windows
-# .venv\Scripts\activate
-
-# create requirements
-cat > requirements.txt << 'EOF'
-pandas>=2.0
-numpy>=1.24
-scikit-learn>=1.3
-matplotlib>=3.7
-seaborn>=0.12
-pyyaml>=6.0
-EOF
-
-pip install -r requirements.txt
+Hormone2Final: measures correlation between hormones and final outcomes
