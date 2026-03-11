@@ -197,3 +197,50 @@ def load_patient_split(output_dir=config.OUTPUT_DIR):
     train_patients = split_df[split_df['set'] == 'train']['patient_id'].values
     test_patients = split_df[split_df['set'] == 'test']['patient_id'].values
     return train_patients, test_patients
+
+# data_loader.py – add this new function
+
+def ensure_patient_split(df_pl, output_dir, n_patients=config.N_PATIENTS,
+                         test_size=config.TEST_SIZE, random_state=config.RANDOM_STATE):
+    """
+    Ensure a patient split file exists. If not, create one using at most n_patients patients.
+    Returns (train_patients, test_patients) as numpy arrays.
+    """
+    split_path = output_dir / 'patient_split.csv'
+    if split_path.exists():
+        print(f"📁 Loading existing patient split from {split_path}")
+        return load_patient_split(output_dir)
+
+    print(f"🆕 Creating new patient split with up to {n_patients} patients...")
+    # Get unique patient IDs from the Polars DataFrame
+    patient_ids = df_pl.select('id').unique().to_series().to_list()
+    total_patients = len(patient_ids)
+    print(f"   Total patients available: {total_patients}")
+
+    if total_patients > n_patients:
+        # Randomly sample n_patients patients
+        rng = np.random.default_rng(random_state)
+        selected_patients = rng.choice(patient_ids, size=n_patients, replace=False)
+        print(f"   Randomly selected {n_patients} patients out of {total_patients}")
+    else:
+        selected_patients = patient_ids
+        if total_patients < n_patients:
+            print(f"   ⚠️ Only {total_patients} patients available (< {n_patients}) – using all.")
+        else:
+            print(f"   Using all {total_patients} patients (≤ {n_patients})")
+
+    # Split selected patients
+    from sklearn.model_selection import train_test_split
+    train_patients, test_patients = train_test_split(
+        selected_patients, test_size=test_size, random_state=random_state
+    )
+
+    # Save split
+    split_df = pd.DataFrame({
+        'patient_id': np.concatenate([train_patients, test_patients]),
+        'set': ['train'] * len(train_patients) + ['test'] * len(test_patients)
+    })
+    split_df.to_csv(split_path, index=False)
+    print(f"✅ Patient split saved to {split_path}")
+    print(f"   Training patients: {len(train_patients)}, Test patients: {len(test_patients)}")
+    return train_patients, test_patients

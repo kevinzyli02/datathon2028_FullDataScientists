@@ -70,11 +70,11 @@ def run_stage1(data_dir=config.DATA_DIR, output_dir=config.OUTPUT_DIR, force_rec
     # 1. Load data with Polars
     df_pl = data_loader.load_data_polars(config.COMPREHENSIVE_FILES, data_dir, config.SAMPLE_SIZE, use_parquet=True)
 
-    # 2. Patient split (save using pandas version – convert to pandas)
-    df_pd_for_split = df_pl.select(['id']).unique().to_pandas()
-    # Actually, we need the full df for split, but save_patient_split only needs IDs. We can pass the Polars df and it converts.
-    train_patients, test_patients = data_loader.save_patient_split(df_pl, config.TEST_SIZE, config.RANDOM_STATE, output_dir)
-
+    # 2. Patient split – ensure it exists (uses at most config.N_PATIENTS)
+    train_patients, test_patients = data_loader.ensure_patient_split(
+        df_pl, output_dir, n_patients=config.N_PATIENTS,
+        test_size=config.TEST_SIZE, random_state=config.RANDOM_STATE
+    )
     # 3. Baseline normalization & personalized features (Polars)
     print("\n🔄 Applying baseline normalization...")
     df_pl = features.normalize_by_baseline_polars(df_pl, config.TARGETS, baseline_days=3)

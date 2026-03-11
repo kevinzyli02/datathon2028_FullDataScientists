@@ -13,7 +13,7 @@ COMPREHENSIVE_FILES = [
     'sleep.csv',
     'stress_score.csv',
     'resting_heart_rate.csv',
-    'glucose.csv',                # or daily_norm_unmodified.csv – adjust as needed
+    'daily_norm.csv',                # or daily_norm_unmodified.csv – adjust as needed
     'computed_temperature.csv',
     'height_and_weight.csv',
     'exercise.csv',
@@ -26,7 +26,8 @@ COMPREHENSIVE_FILES = [
 TARGETS = ['lh', 'estrogen', 'pdg']
 TEST_SIZE = 0.2
 RANDOM_STATE = 42
-SAMPLE_SIZE = 15000
+N_PATIENTS = 42
+SAMPLE_SIZE = 1000000
 
 # For stage 2 (cycle prediction)
-CYCLE_TARGET = 'day_in_study'   # change if needed
+CYCLE_TARGET = ''   # change if needed
