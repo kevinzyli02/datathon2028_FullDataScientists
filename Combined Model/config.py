@@ -1,10 +1,10 @@
 from pathlib import Path
 
-# Paths
-DATA_DIR = Path(r"C:\Users\kevin\PycharmProjects\datathon2028_FullDataScientists\data")
-OUTPUT_DIR = Path(r'C:\Users\kevin\PycharmProjects\datathon2028_FullDataScientists\Combined Model\patient_wise_model_analysis')
-FILTERED_DATA_DIR = Path('filtered_data')
-PARQUET_DIR = Path('parquet_data')          # new: for converted Parquet files
+BASE_DIR = Path(__file__).parent  # directory of this config file
+DATA_DIR = BASE_DIR / "data"   # adjust if your data is elsewhere
+OUTPUT_DIR = BASE_DIR / "patient_wise_model_analysis"
+FILTERED_DATA_DIR = BASE_DIR / "filtered_data"
+PARQUET_DIR = BASE_DIR / "parquet_data"
 MAIN_FILE = 'hormones_and_selfreport.csv'
 
 # Files to load

@@ -10,7 +10,6 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     if args.all or (not args.stage1 and not args.stage2):
-        # Default: run both
         run_stage1()
         run_stage2()
     else:
@@ -18,5 +17,3 @@ if __name__ == "__main__":
             run_stage1()
         if args.stage2:
             run_stage2()
-
-
