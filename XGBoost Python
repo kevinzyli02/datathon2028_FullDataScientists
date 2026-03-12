@@ -24,7 +24,7 @@ import seaborn as sns
 import gc
 import time
 
-DATA_DIR = Path(r"C:/Users/samwu/Sam_Wu/UT Southwestern/2025 PC1/MD+ Datathon/McPhases Dataset/MODIFIED Dataset regular cycles only")
+DATA_DIR = Path('data')
 OUTPUT_DIR = Path('patient_wise_model_analysis')
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
@@ -34,7 +34,7 @@ COMPREHENSIVE_FILES = [
     'sleep.csv',
     'stress_score.csv',
     'resting_heart_rate.csv',
-    'daily_norm_unmodified.csv', 
+    'daily_norm.csv', 
     'computed_temperature.csv',
     'height_and_weight.csv',
     'exercise.csv',
