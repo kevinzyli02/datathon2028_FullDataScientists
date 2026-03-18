@@ -1,25 +1,14 @@
 #!/usr/bin/env python3
 """
-Refactored hormone prediction pipeline – final version.
-
-Features:
-- Predefined patient split from Excel.
-- Patient‑wise 3‑fold CV on training set.
-- Baseline normalisation and personalised features applied separately to train/test.
-- Lagged features (previous days) of daily sensor aggregates.
-- Predicts both raw and normalized versions of each hormone.
-- Diagnostic prints for hormone non‑null counts.
-- Post‑training outputs: predictions CSV, residual plots, feature importance Excel.
+Refactored hormone prediction pipeline – final version with lag comparison.
 """
 
 import logging
 import sys
 from pathlib import Path
 import pandas as pd
-# Add parent directory to path if running as script
 sys.path.append(str(Path(__file__).parent.parent))
 
-# Force matplotlib to use non‑interactive backend (prevents Tkinter thread errors)
 import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
@@ -35,12 +24,11 @@ from utils import (
     get_all_features,
     TARGETS,
     COMPREHENSIVE_FILES,
-    SimpleMixedEffects,
     RandomForestRegressor,
     xgb,
-    lgb,
     create_comprehensive_report,
     generate_post_training_outputs,
+    run_shap_analysis,          # <-- ensure imported
 )
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
@@ -79,81 +67,88 @@ def main():
         write_split_manifest(train_ids, test_ids, df_raw, TARGETS, config.output_dir)
         logger.info(f"Train patients: {len(train_ids)}, Test patients: {len(test_ids)}")
 
-        # 3. Apply baseline normalisation and personalised features SEPARATELY
+        # 3. Apply baseline normalisation and personalised features (common to both experiments)
         logger.info("🔄 Applying baseline normalisation (per set)...")
         train_norm = normalize_by_baseline(train_raw, TARGETS, config.baseline_days)
         test_norm  = normalize_by_baseline(test_raw, TARGETS, config.baseline_days)
 
-        # Diagnostic prints after normalisation
-        print("DEBUG: pdg_normalized non-null count in train_norm:", train_norm['pdg_normalized'].notna().sum())
-        print("DEBUG: pdg_normalized non-null count in test_norm:", test_norm['pdg_normalized'].notna().sum())
-
         logger.info("🎯 Adding personalised features (per set)...")
-        train_enh = add_personalized_features(train_norm, TARGETS, config.rolling_window)
-        test_enh  = add_personalized_features(test_norm, TARGETS, config.rolling_window)
+        train_enh_base = add_personalized_features(train_norm, TARGETS, config.rolling_window)
+        test_enh_base  = add_personalized_features(test_norm, TARGETS, config.rolling_window)
 
-        # Add lagged features (previous days)
-        logger.info("⏪ Adding lagged features (previous days)...")
-        train_enh = add_lag_features(train_enh, lag_days=[1,2,3])
-        test_enh  = add_lag_features(test_enh, lag_days=[1,2,3])
+        # 4. Define lag configurations to compare
+        lag_configs = [
+            {"name": "no_lag", "lag_days": []},
+            {"name": "with_lag", "lag_days": [1, 2, 3]},
+        ]
 
-        # Combine for feature detection (columns must be identical)
-        combined = pd.concat([train_enh, test_enh], ignore_index=True)
+        for lag_cfg in lag_configs:
+            logger.info(f"\n🔬 Running experiment: {lag_cfg['name']}")
+            exp_output_dir = config.output_dir / lag_cfg['name']
+            exp_output_dir.mkdir(exist_ok=True)
 
-        # Build list of all possible target columns (raw and normalized)
-        possible_targets = []
-        for raw_target in TARGETS:
-            # Raw version
-            if raw_target in combined.columns and combined[raw_target].notna().sum() > 0:
-                possible_targets.append(raw_target)
-                print(f"Will predict raw: {raw_target}")
-            # Normalized version
-            norm_col = f"{raw_target}_normalized"
-            if norm_col in combined.columns and combined[norm_col].notna().sum() > 0:
-                possible_targets.append(norm_col)
-                print(f"Will predict normalized: {norm_col}")
+            # Apply lag features if requested
+            if lag_cfg['lag_days']:
+                train_exp = add_lag_features(train_enh_base.copy(), lag_days=lag_cfg['lag_days'])
+                test_exp  = add_lag_features(test_enh_base.copy(), lag_days=lag_cfg['lag_days'])
+            else:
+                train_exp = train_enh_base.copy()
+                test_exp  = test_enh_base.copy()
 
-        logger.info(f"All targets to predict: {possible_targets}")
+            # Combine for feature detection
+            combined = pd.concat([train_exp, test_exp], ignore_index=True)
 
-        # Build feature sets for each target (automatically excludes other hormone columns)
-        feature_sets = get_all_features(combined, possible_targets)
+            # Build list of all possible target columns (raw and normalized)
+            possible_targets = []
+            for raw_target in TARGETS:
+                if raw_target in combined.columns and combined[raw_target].notna().sum() > 0:
+                    possible_targets.append(raw_target)
+                    print(f"Will predict raw: {raw_target}")
+                norm_col = f"{raw_target}_normalized"
+                if norm_col in combined.columns and combined[norm_col].notna().sum() > 0:
+                    possible_targets.append(norm_col)
+                    print(f"Will predict normalized: {norm_col}")
 
-        # 4. Define models
-        models = {
-            'RandomForest': RandomForestRegressor(
-                n_estimators=100, max_depth=10, random_state=config.random_state, n_jobs=-1
-            ),
-            'XGBoost': xgb.XGBRegressor(
-                n_estimators=100, max_depth=6, learning_rate=0.1,
-                random_state=config.random_state, n_jobs=-1
-            ),
-            'LightGBM': lgb.LGBMRegressor(
-                n_estimators=100, max_depth=6, learning_rate=0.1,
-                random_state=config.random_state, n_jobs=-1, verbose=-1
-            ),
-            'MixedEffects': SimpleMixedEffects(min_patient_samples=5),
-        }
+            logger.info(f"All targets to predict: {possible_targets}")
 
-        # 5. Train models with CV on train, evaluate on test
-        results = train_and_evaluate(
-            train_enh, test_enh, feature_sets, possible_targets, models,
-            output_dir=config.output_dir, cv_folds=config.cv_folds,
-            random_state=config.random_state
-        )
+            # Build feature sets for each target
+            feature_sets = get_all_features(combined, possible_targets)
 
-        # 6. Generate final comprehensive report (original function)
-        create_comprehensive_report(results, feature_sets)
+            # 5. Define models (only RandomForest and XGBoost as requested)
+            models = {
+                'RandomForest': RandomForestRegressor(
+                    n_estimators=100, max_depth=10, random_state=config.random_state, n_jobs=-1
+                ),
+                'XGBoost': xgb.XGBRegressor(
+                    n_estimators=100, max_depth=6, learning_rate=0.1,
+                    random_state=config.random_state, n_jobs=-1
+                ),
+            }
 
-        # 7. Generate post‑training outputs: predictions CSV, residual plots, feature importance Excel
-        logger.info("📊 Generating post‑training outputs...")
-        generate_post_training_outputs(results, config.output_dir)
+            # 6. Train models with CV on train, evaluate on test
+            results = train_and_evaluate(
+                train_exp, test_exp, feature_sets, possible_targets, models,
+                output_dir=exp_output_dir, cv_folds=config.cv_folds,
+                random_state=config.random_state
+            )
+
+            # 7. Generate final comprehensive report
+            create_comprehensive_report(results, feature_sets)
+
+            # 8. Generate post‑training outputs: predictions CSV, residual plots, feature importance Excel
+            logger.info("📊 Generating post‑training outputs...")
+            generate_post_training_outputs(results, exp_output_dir)
+
+            # 9. Run SHAP analysis on the best model for each target
+            logger.info("🔍 Running SHAP analysis...")
+            run_shap_analysis(results, feature_sets, exp_output_dir, sample_size=30)
+
+        logger.info(f"✅ All experiments finished. Results in {config.output_dir}")
 
     else:
-        # Fallback to original random‑split pipeline (not shown here for brevity)
+        # Fallback to original random‑split pipeline (not shown for brevity)
         logger.info("Using original random split (not recommended for final analysis)")
         # ... call original main_with_filtering_memory_efficient ...
-
-    logger.info(f"✅ Pipeline finished. Results in {config.output_dir}")
 
 if __name__ == "__main__":
     main()

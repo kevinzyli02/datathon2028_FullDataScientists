@@ -26,6 +26,11 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 import gc
 import time
+import shap
+import matplotlib.pyplot as plt
+from pathlib import Path
+import numpy as np
+import pandas as pd
 
 DATA_DIR = Path('data')
 OUTPUT_DIR = Path('patient_wise_model_analysis')
@@ -1631,6 +1636,187 @@ def add_lag_features(df, lag_days=[1, 2, 3], base_sensors=None):
             # For each patient, shift the column by 'lag' days (uses past values)
             df_lagged[lag_col] = df_lagged.groupby('id')[col].shift(lag)
     return df_lagged
+import os
+# Limit threads before importing numpy/pandas/shap
+os.environ["OMP_NUM_THREADS"] = "1"
+os.environ["MKL_NUM_THREADS"] = "1"
+os.environ["OPENBLAS_NUM_THREADS"] = "1"
+
+import shap
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+import seaborn as sns
+import gc
+import logging
+import traceback
+from pathlib import Path
+
+logger = logging.getLogger(__name__)
+
+def run_shap_analysis(all_results, feature_sets, output_dir, top_k=10, sample_size=30):
+    """
+    Ultra‑memory‑efficient SHAP analysis using standard shap.
+    - Tiny sample size (default 30).
+    - Single‑threaded.
+    - Falls back to built‑in importances if needed.
+    """
+    output_dir = Path(output_dir)
+    shap_dir = output_dir / "shap_analysis"
+    shap_dir.mkdir(exist_ok=True)
+
+    for target, model_dict in all_results.items():
+        if not model_dict:
+            continue
+
+        # Find best model by test R²
+        best_model_name = None
+        best_r2 = -np.inf
+        for name, res in model_dict.items():
+            if res is None:
+                continue
+            r2 = res['test_metrics']['correlation_metrics']['r2']
+            if r2 > best_r2:
+                best_r2 = r2
+                best_model_name = name
+
+        if best_model_name is None:
+            print(f"No valid model for {target}, skipping SHAP.")
+            continue
+
+        print(f"\n🔍 Running SHAP for {target} (best model: {best_model_name}, R²={best_r2:.4f})")
+        res = model_dict[best_model_name]
+        model = res['model']
+        X_test = res['X_test_scaled']
+        feature_names = res['feature_names']
+
+        if X_test.shape[0] == 0:
+            print("   Test set empty, skipping.")
+            continue
+
+        # Use extremely small sample
+        n_samples = min(sample_size, X_test.shape[0])
+        if n_samples < X_test.shape[0]:
+            idx = np.random.choice(X_test.shape[0], n_samples, replace=False)
+            X_sample = X_test[idx]
+        else:
+            X_sample = X_test
+
+        print(f"   Using {n_samples} test samples for SHAP")
+
+        shap_success = False
+        shap_values = None
+        explainer = None
+
+        # ---- Attempt 1: TreeExplainer with the full sample ----
+        try:
+            explainer = shap.TreeExplainer(model)
+            # This computes SHAP for the sample directly
+            shap_values = explainer.shap_values(X_sample)
+            shap_success = True
+            print("   TreeExplainer succeeded")
+        except Exception as e:
+            print(f"   TreeExplainer failed: {e}")
+            traceback.print_exc()
+            gc.collect()
+
+        # ---- Attempt 2: Use Explainer with a tiny background sample ----
+        if not shap_success:
+            try:
+                # Use a small background sample to reduce memory
+                background_size = min(20, X_test.shape[0])
+                bg_idx = np.random.choice(X_test.shape[0], background_size, replace=False)
+                background = X_test[bg_idx]
+                explainer = shap.Explainer(model, background, algorithm='tree')
+                shap_values = explainer(X_sample).values
+                shap_success = True
+                print("   Explainer with background sample succeeded")
+            except Exception as e:
+                print(f"   Explainer also failed: {e}")
+                traceback.print_exc()
+                gc.collect()
+
+        if not shap_success:
+            # Fallback: built‑in feature importance
+            print("   SHAP failed completely. Falling back to built‑in feature importance.")
+            if hasattr(model, 'feature_importances_'):
+                imp_df = pd.DataFrame({
+                    'feature': feature_names,
+                    'importance': model.feature_importances_
+                }).sort_values('importance', ascending=False)
+                imp_df.to_csv(shap_dir / f"feature_importance_{target}_{best_model_name}.csv", index=False)
+                print(f"   Saved built‑in feature importance to CSV")
+            continue
+
+        # ---- Generate plots only if SHAP succeeded ----
+        try:
+            # Summary beeswarm
+            plt.figure(figsize=(12, 8))
+            shap.summary_plot(shap_values, X_sample, feature_names=feature_names, show=False)
+            plt.tight_layout()
+            plt.savefig(shap_dir / f"shap_summary_{target}_{best_model_name}.png", dpi=300, bbox_inches='tight')
+            plt.close()
+            print("   Saved summary plot")
+
+            # Bar plot
+            plt.figure(figsize=(10, 6))
+            shap.summary_plot(shap_values, X_sample, feature_names=feature_names, plot_type="bar", show=False)
+            plt.tight_layout()
+            plt.savefig(shap_dir / f"shap_bar_{target}_{best_model_name}.png", dpi=300, bbox_inches='tight')
+            plt.close()
+            print("   Saved bar plot")
+
+            # Dependence plots for top features
+            mean_abs_shap = np.mean(np.abs(shap_values), axis=0)
+            top_indices = np.argsort(mean_abs_shap)[-top_k:][::-1]
+            for i, idx in enumerate(top_indices):
+                feature = feature_names[idx]
+                plt.figure(figsize=(10, 6))
+                shap.dependence_plot(idx, shap_values, X_sample, feature_names=feature_names,
+                                     show=False, alpha=0.6)
+                plt.tight_layout()
+                plt.savefig(shap_dir / f"shap_dependence_{target}_{best_model_name}_{feature}.png", dpi=300, bbox_inches='tight')
+                plt.close()
+                print(f"   Saved dependence plot {i+1}/{len(top_indices)}: {feature}")
+
+            # Feature correlation heatmap (on the same sample)
+            top_features = [feature_names[i] for i in top_indices]
+            X_top = pd.DataFrame(X_sample[:, top_indices], columns=top_features)
+            corr_matrix = X_top.corr()
+            plt.figure(figsize=(10, 8))
+            sns.heatmap(corr_matrix, annot=True, fmt='.2f', cmap='coolwarm', center=0,
+                        square=True, linewidths=0.5)
+            plt.title(f'Feature Correlation (Top {top_k}) - {target} ({best_model_name})')
+            plt.tight_layout()
+            plt.savefig(shap_dir / f"feature_correlation_{target}_{best_model_name}.png", dpi=300, bbox_inches='tight')
+            plt.close()
+            print("   Saved correlation heatmap")
+
+            # Save SHAP values CSV (only if very small)
+            if X_sample.shape[0] <= 100:
+                shap_df = pd.DataFrame(shap_values, columns=feature_names)
+                shap_df.to_csv(shap_dir / f"shap_values_{target}_{best_model_name}.csv", index=False)
+                print("   Saved SHAP values CSV")
+            else:
+                print("   Skipped saving SHAP values CSV (too many rows)")
+
+            # Save top features CSV
+            top_features_df = pd.DataFrame({
+                'feature': top_features,
+                'mean_abs_shap': mean_abs_shap[top_indices]
+            })
+            top_features_df.to_csv(shap_dir / f"top_features_{target}_{best_model_name}.csv", index=False)
+            print("   Saved top features CSV")
+
+        except Exception as e:
+            print(f"   Error generating SHAP plots: {e}")
+            traceback.print_exc()
+        finally:
+            # Clean up
+            del explainer, shap_values
+            gc.collect()
+
+    print(f"✅ SHAP analysis completed. Plots saved in {shap_dir}")
 # =============================================================================
 # MAIN EXECUTION
 # =============================================================================

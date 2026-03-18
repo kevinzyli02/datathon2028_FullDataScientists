@@ -128,16 +128,17 @@ def train_and_evaluate(
                 output_dir
             )
 
-            # After computing y_pred_test and metrics
+            # Store everything needed, including scaled test features for SHAP
             target_results[name] = {
                 'train_time': train_time,
                 'train_metrics': train_metrics,
                 'test_metrics': test_metrics,
                 'model': model,
-                'test_predictions': y_pred_test,  # new
-                'test_ids': test_patient_ids,  # new
-                'test_true': y_test,  # new
-                'feature_names': features,  # new
+                'test_predictions': y_pred_test,
+                'test_ids': test_patient_ids,
+                'test_true': y_test,
+                'feature_names': features,
+                'X_test_scaled': X_test_scaled,   # <-- added for SHAP
             }
             # Store feature importances if available
             if hasattr(model, 'feature_importances_'):
